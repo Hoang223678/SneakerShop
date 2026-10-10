@@ -1,6 +1,7 @@
 using Inventory.Api.Domain;
 using Microsoft.EntityFrameworkCore;
 using SneakerShop.BuildingBlocks;
+using SneakerShop.BuildingBlocks.Data;
 
 namespace Inventory.Api.Data;
 
@@ -11,7 +12,9 @@ public static class DbInitializer
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<InventoryDbContext>();
 
-        await db.Database.EnsureCreatedAsync(); // demo convenience - use EF migrations in production
+        await LegacyDatabaseMigrationAdoption.AdoptEnsureCreatedDatabaseAsync(
+            db, "StockItems", "__EFMigrationsHistory", "20261009183837_InitialCreate");
+        await db.Database.MigrateAsync();
         if (await db.StockItems.AnyAsync()) return;
 
         // Demo stock for the seeded catalog variants (same IDs as Catalog's seed).

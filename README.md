@@ -86,21 +86,35 @@ dotnet run --project src/Gateway/ApiGateway                 # :5000
 | POST | `/api/inventory/availability` | public | Availability for many variants |
 | GET | `/api/inventory` | admin | Stock list, `maxAvailable` for low stock |
 | PUT | `/api/inventory/{variantId}` | admin | Set quantity on hand |
-| POST | `/api/orders` | user | Place an order |
+| POST | `/api/orders` | user | Place an order (requires `Idempotency-Key`) |
 | GET | `/api/orders/my` | user | My orders |
 | GET | `/api/orders/{id}` | owner/admin | One order |
 | POST | `/api/orders/{id}/cancel` | owner/admin | Cancel (Pending or Confirmed) |
 | GET | `/api/orders` | admin | All orders, filter by `status` |
 | PUT | `/api/orders/{id}/status` | admin | `Shipped` or `Delivered` |
 
-## How an order flows (choreographed saga)
+## How an order flows (Order state machine)
 
-1. `POST /api/orders` - Ordering asks Catalog for the real name/price of each variant (never trusts client prices), stores the order as **Pending**, publishes `OrderCreated`.
-2. Inventory reserves stock for all lines (all-or-nothing) and publishes `StockReserved` or `StockReservationFailed`.
-3. Ordering moves the order to **Confirmed** or **Rejected** (with a reason).
-4. Cancel -> `OrderCancelled` -> Inventory releases the reservation. Ship -> `OrderShipped` -> Inventory deducts the stock permanently.
+1. `POST /api/orders` requires a unique `Idempotency-Key`. Ordering reads authoritative prices from Catalog and saves the **Pending** order and `OrderCreated` in the same SQL transaction using MassTransit's EF bus outbox.
+2. Inventory reserves stock for all lines (all-or-nothing) and publishes `StockReserved` or `StockReservationFailed`; MassTransit's EF consumer outbox makes the reservation and reply recoverable together.
+3. Ordering's persisted MassTransit state machine moves the order to **Confirmed** or **Rejected**. If no reservation response arrives within two minutes, it cancels the order and publishes compensation.
+4. A reservation expires after 15 minutes unless Inventory receives `OrderPaid` (published by the payment integration in response to `OrderPaymentReceived`). Expiration releases stock and cancels the order. Shipping requires a paid order; cancel releases stock and ship commits it.
 
 Order state machine: `Pending -> Confirmed -> Shipped -> Delivered`, with `Pending -> Rejected` and `Pending/Confirmed -> Cancelled`.
+
+Failed MassTransit deliveries retry with exponential backoff. Messages that exhaust retries are retained in RabbitMQ's `<endpoint>_error` queues; `Fault<T>` events are consumed and logged for operational visibility.
+
+## Database migrations and tests
+
+All service databases are initialized with EF Core migrations. Existing databases created by the previous `EnsureCreated` version are detected and baselined automatically, then upgraded with additive migrations while retaining existing data. Back up production databases before deploying schema changes.
+
+Run the Ordering state-machine and integration tests with:
+
+```powershell
+dotnet test src/Services/Ordering/Ordering.Api/test/Ordering.Api.Tests/Ordering.Api.Tests.csproj
+```
+
+The integration tests use Testcontainers and require Docker.
 
 ## Design decisions
 
@@ -114,8 +128,6 @@ Order state machine: `Pending -> Confirmed -> Shipped -> Delivered`, with `Pendi
 
 ## Before going to production
 
-- Replace `EnsureCreated` with **EF Core migrations** (`dotnet ef migrations add ...` per service).
 - Move secrets (`Jwt:Key`, `Internal:ApiKey`, SQL password, demo accounts) to a secret store; use HTTPS.
-- Add the **transactional outbox** (MassTransit EF outbox) so an order and its event are saved atomically.
-- Add a Payment service, email notifications, structured logging/tracing (OpenTelemetry) and automated tests.
+- Add a Payment service, email notifications, and structured tracing (OpenTelemetry).
 - Only expose the gateway; do not publish the per-service ports.

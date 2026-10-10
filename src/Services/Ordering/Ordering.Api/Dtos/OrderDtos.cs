@@ -39,7 +39,7 @@ public record OrderItemDto(
     decimal Size, string Color, decimal UnitPrice, int Quantity, decimal LineTotal);
 
 public record OrderDto(
-    Guid Id, Guid UserId, OrderStatus Status, decimal TotalAmount,
+    Guid Id, Guid UserId, OrderStatus Status, bool IsPaid, decimal TotalAmount,
     string ShippingName, string ShippingPhone, string ShippingAddress,
     string? FailureReason, DateTime CreatedAt, DateTime UpdatedAt,
     IReadOnlyList<OrderItemDto> Items);

@@ -16,11 +16,16 @@ public class OrderCreatedConsumer(InventoryDbContext db) : IConsumer<OrderCreate
     {
         var msg = context.Message;
         var ct = context.CancellationToken;
+        await OrderProcessingLock.AcquireAsync(db, msg.OrderId, ct);
+
+        if (await db.OrderCancellations.AnyAsync(x => x.OrderId == msg.OrderId, ct))
+            return;
 
         // Idempotency: reservations only exist after a successful attempt, so re-announce success.
         if (await db.Reservations.AnyAsync(r => r.OrderId == msg.OrderId, ct))
         {
             await context.Publish(new StockReserved(msg.OrderId), ct);
+            await db.SaveChangesAsync(ct);
             return;
         }
 
@@ -37,6 +42,7 @@ public class OrderCreatedConsumer(InventoryDbContext db) : IConsumer<OrderCreate
             {
                 await context.Publish(
                     new StockReservationFailed(msg.OrderId, $"Insufficient stock for variant {variantId}."), ct);
+                await db.SaveChangesAsync(ct);
                 return;
             }
         }
@@ -54,13 +60,14 @@ public class OrderCreatedConsumer(InventoryDbContext db) : IConsumer<OrderCreate
                 VariantId = variantId,
                 Quantity = quantity,
                 Status = ReservationStatus.Reserved,
-                CreatedAt = now
+                CreatedAt = now,
+                ExpiresAt = now.AddMinutes(15)
             });
         }
 
         // If two orders race for the last pair, RowVersion makes one of them fail with a concurrency
         // exception; MassTransit retries it and it then sees the updated stock.
-        await db.SaveChangesAsync(ct);
         await context.Publish(new StockReserved(msg.OrderId), ct);
+        await db.SaveChangesAsync(ct);
     }
 }

@@ -2,6 +2,7 @@ using Catalog.Api.Domain;
 using Catalog.Api.Helpers;
 using Microsoft.EntityFrameworkCore;
 using SneakerShop.BuildingBlocks;
+using SneakerShop.BuildingBlocks.Data;
 
 namespace Catalog.Api.Data;
 
@@ -12,7 +13,9 @@ public static class DbInitializer
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
 
-        await db.Database.EnsureCreatedAsync(); // demo convenience - use EF migrations in production
+        await LegacyDatabaseMigrationAdoption.AdoptEnsureCreatedDatabaseAsync(
+            db, "Brands", "__EFMigrationsHistory", "20261009183844_InitialCreate");
+        await db.Database.MigrateAsync();
         if (await db.Sneakers.AnyAsync()) return;
 
         var existing = await db.Brands.ToDictionaryAsync(b => b.Name);

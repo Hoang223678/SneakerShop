@@ -15,6 +15,7 @@ public class Order
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid UserId { get; set; }
     public OrderStatus Status { get; set; } = OrderStatus.Pending;
+    public bool IsPaid { get; set; }
     public decimal TotalAmount { get; set; }
 
     public string ShippingName { get; set; } = string.Empty;
@@ -22,6 +23,7 @@ public class Order
     public string ShippingAddress { get; set; } = string.Empty;
 
     public string? FailureReason { get; set; }
+    public string IdempotencyKey { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
@@ -47,9 +49,17 @@ public class Order
         return true;
     }
 
-    public bool TryShip() => Transition(OrderStatus.Confirmed, OrderStatus.Shipped);
+    public bool TryShip() => IsPaid && Transition(OrderStatus.Confirmed, OrderStatus.Shipped);
 
     public bool TryDeliver() => Transition(OrderStatus.Shipped, OrderStatus.Delivered);
+
+    public bool TryMarkPaid()
+    {
+        if (Status != OrderStatus.Confirmed || IsPaid) return false;
+        IsPaid = true;
+        UpdatedAt = DateTime.UtcNow;
+        return true;
+    }
 
     private bool Transition(OrderStatus from, OrderStatus to)
     {

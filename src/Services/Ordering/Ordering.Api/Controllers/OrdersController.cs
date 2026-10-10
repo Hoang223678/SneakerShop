@@ -14,9 +14,19 @@ public class OrdersController(IOrderService orders) : ControllerBase
 {
     /// <summary>Place an order. It starts as Pending and becomes Confirmed or Rejected once stock is checked.</summary>
     [HttpPost]
-    public async Task<ActionResult<OrderDto>> Create(CreateOrderRequest request, CancellationToken ct)
+    public async Task<ActionResult<OrderDto>> Create(
+        CreateOrderRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+        CancellationToken ct)
     {
-        var order = await orders.CreateAsync(User.GetUserId(), request, ct);
+        if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 128)
+            return BadRequest(new ProblemDetails
+            {
+                Title = "A valid Idempotency-Key header is required.",
+                Status = StatusCodes.Status400BadRequest
+            });
+
+        var order = await orders.CreateAsync(User.GetUserId(), request, idempotencyKey.Trim(), ct);
         return CreatedAtAction(nameof(Get), new { id = order.Id }, order);
     }
 

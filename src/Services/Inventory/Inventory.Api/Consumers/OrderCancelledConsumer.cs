@@ -12,12 +12,21 @@ public class OrderCancelledConsumer(InventoryDbContext db) : IConsumer<OrderCanc
     public async Task Consume(ConsumeContext<OrderCancelled> context)
     {
         var ct = context.CancellationToken;
+        await OrderProcessingLock.AcquireAsync(db, context.Message.OrderId, ct);
+
+        if (!await db.OrderCancellations.AnyAsync(x => x.OrderId == context.Message.OrderId, ct))
+            db.OrderCancellations.Add(new OrderCancellation { OrderId = context.Message.OrderId });
 
         var reservations = await db.Reservations
-            .Where(r => r.OrderId == context.Message.OrderId && r.Status == ReservationStatus.Reserved)
+            .Where(r => r.OrderId == context.Message.OrderId &&
+                        (r.Status == ReservationStatus.Reserved || r.Status == ReservationStatus.Paid))
             .ToListAsync(ct);
 
-        if (reservations.Count == 0) return; // nothing to release (or already released)
+        if (reservations.Count == 0)
+        {
+            await db.SaveChangesAsync(ct);
+            return;
+        }
 
         var variantIds = reservations.Select(r => r.VariantId).Distinct().ToList();
         var stocks = await db.StockItems.Where(s => variantIds.Contains(s.VariantId)).ToDictionaryAsync(s => s.VariantId, ct);

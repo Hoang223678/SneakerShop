@@ -14,7 +14,8 @@ public class OrderShippedConsumer(InventoryDbContext db) : IConsumer<OrderShippe
         var ct = context.CancellationToken;
 
         var reservations = await db.Reservations
-            .Where(r => r.OrderId == context.Message.OrderId && r.Status == ReservationStatus.Reserved)
+            .Where(r => r.OrderId == context.Message.OrderId &&
+                        (r.Status == ReservationStatus.Reserved || r.Status == ReservationStatus.Paid))
             .ToListAsync(ct);
 
         if (reservations.Count == 0) return;

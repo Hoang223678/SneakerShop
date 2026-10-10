@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using MassTransit;
 using Ordering.Api.Domain;
 
 namespace Ordering.Api.Data;
@@ -14,14 +15,18 @@ public class OrderDbContext(DbContextOptions<OrderDbContext> options) : DbContex
         {
             e.ToTable("Orders");
             e.Property(o => o.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(o => o.IsPaid).IsRequired();
             e.Property(o => o.TotalAmount).HasPrecision(18, 2);
             e.Property(o => o.ShippingName).HasMaxLength(150).IsRequired();
             e.Property(o => o.ShippingPhone).HasMaxLength(30).IsRequired();
             e.Property(o => o.ShippingAddress).HasMaxLength(500).IsRequired();
             e.Property(o => o.FailureReason).HasMaxLength(500);
+            e.Property(o => o.IdempotencyKey).HasMaxLength(128).IsRequired();
             e.Property(o => o.RowVersion).IsRowVersion();
             e.HasIndex(o => o.UserId).HasDatabaseName("IX_Orders_UserId");
             e.HasIndex(o => o.Status).HasDatabaseName("IX_Orders_Status");
+            e.HasIndex(o => new { o.UserId, o.IdempotencyKey }).IsUnique()
+                .HasDatabaseName("UQ_Orders_UserId_IdempotencyKey");
             e.HasMany(o => o.Items).WithOne().HasForeignKey(i => i.OrderId).OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -34,5 +39,9 @@ public class OrderDbContext(DbContextOptions<OrderDbContext> options) : DbContex
             e.Property(i => i.Color).HasMaxLength(50).IsRequired();
             e.Property(i => i.UnitPrice).HasPrecision(18, 2);
         });
+
+        modelBuilder.AddInboxStateEntity();
+        modelBuilder.AddOutboxMessageEntity();
+        modelBuilder.AddOutboxStateEntity();
     }
 }

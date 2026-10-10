@@ -43,6 +43,7 @@ Content-Type: application/json
 ### 5. Place an order as the customer -> starts Pending, becomes Confirmed after the stock check
 # @name createOrder
 POST {{host}}/api/orders
+Idempotency-Key: {{$guid}}
 Authorization: Bearer {{customerToken}}
 Content-Type: application/json
 

@@ -1,14 +1,30 @@
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Ordering.Api.Data;
+using Ordering.Api.Sagas;
 using Ordering.Api.Services;
 using SneakerShop.BuildingBlocks;
+using SneakerShop.BuildingBlocks.Consumers;
+using SneakerShop.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddDbContext<OrderDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("Default"),
-        sql => sql.EnableRetryOnFailure()));
+var connectionString = builder.Configuration.GetConnectionString("Default")
+    ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured.");
+builder.Services.AddDbContextFactory<OrderDbContext>(options =>
+    options.UseSqlServer(connectionString,
+        sql =>
+        {
+            sql.EnableRetryOnFailure();
+            sql.MigrationsHistoryTable("__EFMigrationsHistory_Ordering");
+        }));
+builder.Services.AddDbContextFactory<OrderSagaDbContext>(options =>
+    options.UseSqlServer(connectionString, sql =>
+    {
+        sql.EnableRetryOnFailure();
+        sql.MigrationsHistoryTable("__EFMigrationsHistory_OrderSaga");
+    }));
+builder.Services.AddHostedService<OrderSagaTimeoutService>();
 
 builder.Services.AddScoped<IOrderService, OrderService>();
 
@@ -22,7 +38,35 @@ builder.Services.AddHttpClient<ICatalogClient, CatalogClient>(client =>
 });
 
 builder.Services.AddJwtAuth(builder.Configuration);
-builder.Services.AddMessaging(builder.Configuration, x => x.AddConsumers(typeof(Program).Assembly));
+builder.Services.AddMessaging(builder.Configuration, x =>
+{
+    x.AddConsumer<FaultAuditConsumer<OrderCreated>>();
+    x.AddConsumer<FaultAuditConsumer<StockReserved>>();
+    x.AddConsumer<FaultAuditConsumer<StockReservationFailed>>();
+    x.AddConsumer<FaultAuditConsumer<OrderReservationTimedOut>>();
+    x.AddConsumer<FaultAuditConsumer<OrderReservationExpired>>();
+    x.AddConsumer<FaultAuditConsumer<OrderPaymentReceived>>();
+    x.AddConsumer<FaultAuditConsumer<OrderCancelled>>();
+    x.AddConsumer<FaultAuditConsumer<OrderShipped>>();
+    x.AddEntityFrameworkOutbox<OrderDbContext>(o =>
+    {
+        o.UseSqlServer();
+        o.UseBusOutbox();
+    });
+    x.AddConfigureEndpointsCallback((context, _, endpoint) =>
+        endpoint.UseEntityFrameworkOutbox<OrderDbContext>(context));
+    x.AddSagaStateMachine<OrderStateMachine, OrderState>()
+        .EntityFrameworkRepository(r =>
+        {
+            r.ConcurrencyMode = ConcurrencyMode.Optimistic;
+            r.AddDbContext<DbContext, OrderSagaDbContext>((_, options) =>
+                options.UseSqlServer(connectionString, sql =>
+                {
+                    sql.EnableRetryOnFailure();
+                    sql.MigrationsHistoryTable("__EFMigrationsHistory_OrderSaga");
+                }));
+        });
+});
 builder.Services.AddApiDefaults();
 builder.Services.AddSwaggerWithJwt("Sneaker Shop - Ordering API");
 builder.Services.AddControllers().AddApiJson();

@@ -1,6 +1,7 @@
 using Identity.Api.Domain;
 using Microsoft.EntityFrameworkCore;
 using SneakerShop.BuildingBlocks;
+using SneakerShop.BuildingBlocks.Data;
 
 namespace Identity.Api.Data;
 
@@ -14,7 +15,9 @@ public static class DbInitializer
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AuthDbContext>();
 
-        await db.Database.EnsureCreatedAsync();
+        await LegacyDatabaseMigrationAdoption.AdoptEnsureCreatedDatabaseAsync(
+            db, "Users", "__EFMigrationsHistory", "20261009183851_InitialCreate");
+        await db.Database.MigrateAsync();
         if (await db.Users.AnyAsync()) return;
 
         db.Users.Add(new User

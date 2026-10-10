@@ -1,5 +1,6 @@
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 using Ordering.Api.Data;
 using Ordering.Api.Domain;
 using Ordering.Api.Dtos;
@@ -10,7 +11,7 @@ namespace Ordering.Api.Services;
 
 public interface IOrderService
 {
-    Task<OrderDto> CreateAsync(Guid userId, CreateOrderRequest request, CancellationToken ct);
+    Task<OrderDto> CreateAsync(Guid userId, CreateOrderRequest request, string idempotencyKey, CancellationToken ct);
     Task<OrderDto> GetAsync(Guid orderId, Guid userId, bool isAdmin, CancellationToken ct);
     Task<List<OrderDto>> ListMineAsync(Guid userId, CancellationToken ct);
     Task<PagedResult<OrderDto>> ListAllAsync(OrderStatus? status, int page, int pageSize, CancellationToken ct);
@@ -20,8 +21,12 @@ public interface IOrderService
 
 public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEndpoint publisher) : IOrderService
 {
-    public async Task<OrderDto> CreateAsync(Guid userId, CreateOrderRequest request, CancellationToken ct)
+    public async Task<OrderDto> CreateAsync(Guid userId, CreateOrderRequest request, string idempotencyKey, CancellationToken ct)
     {
+        var existingOrder = await db.Orders.AsNoTracking().Include(o => o.Items)
+            .FirstOrDefaultAsync(o => o.UserId == userId && o.IdempotencyKey == idempotencyKey, ct);
+        if (existingOrder is not null) return existingOrder.ToDto();
+
         // Merge duplicate lines of the same variant.
         var lines = request.Items
             .GroupBy(i => i.VariantId)
@@ -43,6 +48,7 @@ public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEnd
         var order = new Order
         {
             UserId = userId,
+            IdempotencyKey = idempotencyKey,
             ShippingName = request.ShippingName.Trim(),
             ShippingPhone = request.ShippingPhone.Trim(),
             ShippingAddress = request.ShippingAddress.Trim()
@@ -68,10 +74,20 @@ public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEnd
         order.TotalAmount = order.Items.Sum(i => i.UnitPrice * i.Quantity);
 
         db.Orders.Add(order);
-        await db.SaveChangesAsync(ct);
-
-        // Start the saga: Inventory will answer with StockReserved or StockReservationFailed.
         await publisher.Publish(new OrderCreated(order.Id, userId, lines), ct);
+        try
+        {
+            // The EF bus outbox persists the order and message in one database transaction.
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
+        {
+            db.ChangeTracker.Clear();
+            var concurrentOrder = await db.Orders.AsNoTracking().Include(o => o.Items)
+                .FirstOrDefaultAsync(o => o.UserId == userId && o.IdempotencyKey == idempotencyKey, ct);
+            if (concurrentOrder is null) throw;
+            return concurrentOrder.ToDto();
+        }
 
         return order.ToDto();
     }
@@ -119,10 +135,9 @@ public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEnd
         if (!order.TryCancel())
             throw new AppException(StatusCodes.Status409Conflict, $"An order that is {order.Status} cannot be cancelled.");
 
-        await SaveAsync(ct);
-
         // Compensation: Inventory releases any stock it reserved for this order.
         await publisher.Publish(new OrderCancelled(order.Id), ct);
+        await SaveAsync(ct);
         return order.ToDto();
     }
 
@@ -133,11 +148,12 @@ public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEnd
 
         var order = await FindTrackedAsync(orderId, ct);
 
+        if (newStatus == OrderStatus.Shipped && !order.IsPaid)
+            throw new AppException(StatusCodes.Status409Conflict, "An order must be paid before it can be shipped.");
+
         var ok = newStatus == OrderStatus.Shipped ? order.TryShip() : order.TryDeliver();
         if (!ok)
             throw new AppException(StatusCodes.Status409Conflict, $"Cannot move an order from {order.Status} to {newStatus}.");
-
-        await SaveAsync(ct);
 
         if (newStatus == OrderStatus.Shipped)
         {
@@ -145,6 +161,7 @@ public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEnd
             await publisher.Publish(new OrderShipped(order.Id, lines), ct);
         }
 
+        await SaveAsync(ct);
         return order.ToDto();
     }
 
@@ -163,4 +180,7 @@ public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEnd
             throw new AppException(StatusCodes.Status409Conflict, "The order was changed by another request. Please retry.");
         }
     }
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException exception) =>
+        exception.InnerException is SqlException { Number: 2601 or 2627 };
 }

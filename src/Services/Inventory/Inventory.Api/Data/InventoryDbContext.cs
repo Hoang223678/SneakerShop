@@ -1,5 +1,6 @@
 using Inventory.Api.Domain;
 using Microsoft.EntityFrameworkCore;
+using MassTransit;
 
 namespace Inventory.Api.Data;
 
@@ -7,6 +8,7 @@ public class InventoryDbContext(DbContextOptions<InventoryDbContext> options) : 
 {
     public DbSet<StockItem> StockItems => Set<StockItem>();
     public DbSet<StockReservation> Reservations => Set<StockReservation>();
+    public DbSet<OrderCancellation> OrderCancellations => Set<OrderCancellation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -24,8 +26,21 @@ public class InventoryDbContext(DbContextOptions<InventoryDbContext> options) : 
         {
             e.ToTable("StockReservations");
             e.Property(r => r.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(r => r.RowVersion).IsRowVersion();
             e.HasIndex(r => r.OrderId).HasDatabaseName("IX_StockReservations_OrderId");
             e.HasIndex(r => r.VariantId).HasDatabaseName("IX_StockReservations_VariantId");
+            e.HasIndex(r => new { r.Status, r.ExpiresAt })
+                .HasDatabaseName("IX_StockReservations_Status_ExpiresAt");
         });
+
+        modelBuilder.Entity<OrderCancellation>(e =>
+        {
+            e.ToTable("OrderCancellations");
+            e.HasKey(x => x.OrderId);
+        });
+
+        modelBuilder.AddInboxStateEntity();
+        modelBuilder.AddOutboxMessageEntity();
+        modelBuilder.AddOutboxStateEntity();
     }
 }
