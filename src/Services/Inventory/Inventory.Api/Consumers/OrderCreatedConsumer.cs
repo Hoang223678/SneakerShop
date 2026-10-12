@@ -61,7 +61,7 @@ public class OrderCreatedConsumer(InventoryDbContext db) : IConsumer<OrderCreate
                 Quantity = quantity,
                 Status = ReservationStatus.Reserved,
                 CreatedAt = now,
-                ExpiresAt = now.AddMinutes(15)
+                ExpiresAt = msg.PaymentExpiresAt
             });
         }
 

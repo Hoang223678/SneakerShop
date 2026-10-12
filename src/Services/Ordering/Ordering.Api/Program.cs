@@ -45,7 +45,9 @@ builder.Services.AddMessaging(builder.Configuration, x =>
     x.AddConsumer<FaultAuditConsumer<StockReservationFailed>>();
     x.AddConsumer<FaultAuditConsumer<OrderReservationTimedOut>>();
     x.AddConsumer<FaultAuditConsumer<OrderReservationExpired>>();
-    x.AddConsumer<FaultAuditConsumer<OrderPaymentReceived>>();
+    x.AddConsumer<FaultAuditConsumer<PaymentSucceeded>>();
+    x.AddConsumer<FaultAuditConsumer<PaymentFailed>>();
+    x.AddConsumer<FaultAuditConsumer<PaymentRefunded>>();
     x.AddConsumer<FaultAuditConsumer<OrderCancelled>>();
     x.AddConsumer<FaultAuditConsumer<OrderShipped>>();
     x.AddEntityFrameworkOutbox<OrderDbContext>(o =>

@@ -6,6 +6,8 @@ CREATE TABLE dbo.Orders (
     UserId          UNIQUEIDENTIFIER NOT NULL,   -- Identity's User.Id (no cross-database FK)
     Status          NVARCHAR(20)     NOT NULL,   -- Pending | Confirmed | Rejected | Cancelled | Shipped | Delivered
     TotalAmount     DECIMAL(18,2)    NOT NULL,
+    PaymentId       UNIQUEIDENTIFIER NULL,
+    PaymentExpiresAt DATETIME2       NOT NULL,
     ShippingName    NVARCHAR(150)    NOT NULL,
     ShippingPhone   NVARCHAR(30)     NOT NULL,
     ShippingAddress NVARCHAR(500)    NOT NULL,

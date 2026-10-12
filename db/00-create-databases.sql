@@ -4,4 +4,5 @@ IF DB_ID(N'SneakerShop_Identity')  IS NULL CREATE DATABASE SneakerShop_Identity;
 IF DB_ID(N'SneakerShop_Catalog')   IS NULL CREATE DATABASE SneakerShop_Catalog;
 IF DB_ID(N'SneakerShop_Inventory') IS NULL CREATE DATABASE SneakerShop_Inventory;
 IF DB_ID(N'SneakerShop_Ordering')  IS NULL CREATE DATABASE SneakerShop_Ordering;
+IF DB_ID(N'SneakerShop_Payment')  IS NULL CREATE DATABASE SneakerShop_Payment;
 GO

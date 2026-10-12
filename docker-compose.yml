@@ -93,6 +93,26 @@ services:
     ports:
       - "5004:8080"
 
+  payment-api:
+    build:
+      context: .
+      dockerfile: src/Services/Payments/Payment.Api/Dockerfile
+    environment:
+      <<: *service-env
+      ConnectionStrings__Default: "Server=sqlserver,1433;Database=SneakerShop_Payment;User Id=sa;Password=${SA_PASSWORD:-Sneaker_Shop123};TrustServerCertificate=True;Encrypt=False"
+      Services__Ordering__BaseUrl: "http://ordering-api:8080/"
+      Payments__VnPay__TmnCode: ${VNPAY_TMN_CODE:-}
+      Payments__VnPay__HashSecret: ${VNPAY_HASH_SECRET:-}
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      ordering-api:
+        condition: service_started
+    ports:
+      - "5005:8080"
+
   api-gateway:
     build:
       context: .
@@ -103,11 +123,13 @@ services:
       ReverseProxy__Clusters__catalog__Destinations__d1__Address: "http://catalog-api:8080/"
       ReverseProxy__Clusters__inventory__Destinations__d1__Address: "http://inventory-api:8080/"
       ReverseProxy__Clusters__ordering__Destinations__d1__Address: "http://ordering-api:8080/"
+      ReverseProxy__Clusters__payment__Destinations__d1__Address: "http://payment-api:8080/"
     depends_on:
       - identity-api
       - catalog-api
       - inventory-api
       - ordering-api
+      - payment-api
     ports:
       - "5000:8080"
 

@@ -44,6 +44,7 @@ public class OrderSagaIntegrationTests
         var provider = host.Services;
         var orderId = Guid.NewGuid();
         var variantId = Guid.NewGuid();
+        var paymentExpiresAt = DateTime.UtcNow.AddMinutes(15);
         while (FaultCaptureConsumer<OrderCreated>.Errors.TryDequeue(out _)) { }
         while (FaultCaptureConsumer<StockReserved>.Errors.TryDequeue(out _)) { }
         try
@@ -64,6 +65,8 @@ public class OrderSagaIntegrationTests
                 {
                     Id = orderId,
                     UserId = userId,
+                    TotalAmount = 20m,
+                    PaymentExpiresAt = paymentExpiresAt,
                     IdempotencyKey = Guid.NewGuid().ToString("N"),
                     ShippingName = "Integration",
                     ShippingPhone = "0900000000",
@@ -78,7 +81,8 @@ public class OrderSagaIntegrationTests
                 });
 
                 await scope.ServiceProvider.GetRequiredService<IPublishEndpoint>()
-                    .Publish(new OrderCreated(orderId, userId, new[] { new OrderLine(variantId, 2) }));
+                    .Publish(new OrderCreated(
+                        orderId, userId, new[] { new OrderLine(variantId, 2) }, paymentExpiresAt));
                 await orders.SaveChangesAsync();
                 await inventory.SaveChangesAsync();
             }
@@ -122,8 +126,9 @@ public class OrderSagaIntegrationTests
                     TimeSpan.FromMinutes(14.9), TimeSpan.FromMinutes(15.1));
             }
 
+            var paymentId = Guid.NewGuid();
             await provider.GetRequiredService<IBus>()
-                .Publish(new OrderPaymentReceived(orderId));
+                .Publish(new PaymentSucceeded(orderId, paymentId, 20m));
             await WaitForAsync(async () =>
             {
                 await using var scope = provider.CreateAsyncScope();

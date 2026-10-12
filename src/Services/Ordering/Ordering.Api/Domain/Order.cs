@@ -16,7 +16,9 @@ public class Order
     public Guid UserId { get; set; }
     public OrderStatus Status { get; set; } = OrderStatus.Pending;
     public bool IsPaid { get; set; }
+    public Guid? PaymentId { get; set; }
     public decimal TotalAmount { get; set; }
+    public DateTime PaymentExpiresAt { get; set; }
 
     public string ShippingName { get; set; } = string.Empty;
     public string ShippingPhone { get; set; } = string.Empty;

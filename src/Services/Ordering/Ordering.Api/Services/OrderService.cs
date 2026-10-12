@@ -49,6 +49,7 @@ public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEnd
         {
             UserId = userId,
             IdempotencyKey = idempotencyKey,
+            PaymentExpiresAt = DateTime.UtcNow.AddMinutes(15),
             ShippingName = request.ShippingName.Trim(),
             ShippingPhone = request.ShippingPhone.Trim(),
             ShippingAddress = request.ShippingAddress.Trim()
@@ -74,7 +75,7 @@ public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEnd
         order.TotalAmount = order.Items.Sum(i => i.UnitPrice * i.Quantity);
 
         db.Orders.Add(order);
-        await publisher.Publish(new OrderCreated(order.Id, userId, lines), ct);
+        await publisher.Publish(new OrderCreated(order.Id, userId, lines, order.PaymentExpiresAt), ct);
         try
         {
             // The EF bus outbox persists the order and message in one database transaction.
@@ -137,6 +138,8 @@ public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEnd
 
         // Compensation: Inventory releases any stock it reserved for this order.
         await publisher.Publish(new OrderCancelled(order.Id), ct);
+        if (order.IsPaid && order.PaymentId is Guid paymentId)
+            await publisher.Publish(new RefundRequested(order.Id, order.Id, paymentId, 0, RefundRemaining: true), ct);
         await SaveAsync(ct);
         return order.ToDto();
     }

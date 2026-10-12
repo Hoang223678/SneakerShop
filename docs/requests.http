@@ -72,18 +72,52 @@ Authorization: Bearer {{customerToken}}
 GET {{host}}/api/inventory?page=1&pageSize=5
 Authorization: Bearer {{adminToken}}
 
-### 7a. Cancel it (releases the reserved stock) ...
+### 7. Start payment using the local Fake provider
+# @name createPayment
+POST {{host}}/api/payments
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "orderId": "{{orderId}}",
+  "method": "Fake"
+}
+
+###
+@paymentId = {{createPayment.response.body.$.id}}
+@attemptId = {{createPayment.response.body.$.attemptId}}
+
+### Complete the Fake attempt (development only)
+POST {{host}}/api/payments/dev/attempts/{{attemptId}}/succeed
+Authorization: Bearer {{customerToken}}
+
+###
+GET {{host}}/api/payments/{{paymentId}}
+Authorization: Bearer {{customerToken}}
+
+### Admin: request a partial refund; the key makes retries idempotent
+POST {{host}}/api/payments/{{paymentId}}/refund
+Idempotency-Key: {{$guid}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "amount": 1.00 }
+
+### VNPay IPN example only; replace with a valid provider-signed payload
+GET {{host}}/api/payments/webhooks/vnpay?vnp_TxnRef=ATTEMPT_ID&vnp_Amount=100000&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TransactionNo=TRANSACTION_ID&vnp_TmnCode=TMNCODE&vnp_CurrCode=VND&vnp_SecureHash=SIGNATURE
+
+### 8a. Cancel it (releases reserved stock; a paid order is refunded) ...
 POST {{host}}/api/orders/{{orderId}}/cancel
 Authorization: Bearer {{customerToken}}
 
-### 7b. ... or, as admin, ship it (deducts the stock for good) - use a Confirmed order
+### 8b. ... or, as admin, ship it (deducts the stock for good) - use a paid order
 PUT {{host}}/api/orders/{{orderId}}/status
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "status": "Shipped" }
 
-### 8. Admin: add a new sneaker, then a variant (Inventory creates an empty stock record through an event)
+### 9. Admin: add a new sneaker, then a variant (Inventory creates an empty stock record through an event)
 # @name newSneaker
 POST {{host}}/api/sneakers
 Authorization: Bearer {{adminToken}}
@@ -105,14 +139,14 @@ Content-Type: application/json
 ###
 @newVariantId = {{newVariant.response.body.$.id}}
 
-### 9. Admin: put 15 pairs of the new variant in stock
+### 10. Admin: put 15 pairs of the new variant in stock
 PUT {{host}}/api/inventory/{{newVariantId}}
 Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 { "quantity": 15 }
 
-### 10. Register a brand-new customer
+### 11. Register a brand-new customer
 POST {{host}}/api/auth/register
 Content-Type: application/json
 

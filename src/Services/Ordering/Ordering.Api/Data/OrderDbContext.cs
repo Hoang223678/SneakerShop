@@ -16,7 +16,9 @@ public class OrderDbContext(DbContextOptions<OrderDbContext> options) : DbContex
             e.ToTable("Orders");
             e.Property(o => o.Status).HasConversion<string>().HasMaxLength(20);
             e.Property(o => o.IsPaid).IsRequired();
+            e.Property(o => o.PaymentId);
             e.Property(o => o.TotalAmount).HasPrecision(18, 2);
+            e.Property(o => o.PaymentExpiresAt).IsRequired();
             e.Property(o => o.ShippingName).HasMaxLength(150).IsRequired();
             e.Property(o => o.ShippingPhone).HasMaxLength(30).IsRequired();
             e.Property(o => o.ShippingAddress).HasMaxLength(500).IsRequired();

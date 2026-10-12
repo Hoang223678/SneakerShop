@@ -21,7 +21,9 @@ public class OrderStateMachine : MassTransitStateMachine<OrderState>
     public Event<OrderReservationExpired> ReservationExpired { get; private set; } = null!;
     public Event<OrderCancelled> OrderCancelled { get; private set; } = null!;
     public Event<OrderShipped> OrderShipped { get; private set; } = null!;
-    public Event<OrderPaymentReceived> OrderPaymentReceived { get; private set; } = null!;
+    public Event<PaymentSucceeded> PaymentSucceeded { get; private set; } = null!;
+    public Event<PaymentFailed> PaymentFailed { get; private set; } = null!;
+    public Event<PaymentRefunded> PaymentRefunded { get; private set; } = null!;
 
     public OrderStateMachine(IDbContextFactory<OrderDbContext> orderDbFactory)
     {
@@ -35,7 +37,19 @@ public class OrderStateMachine : MassTransitStateMachine<OrderState>
         Event(() => ReservationExpired, x => x.CorrelateById(context => context.Message.OrderId));
         Event(() => OrderCancelled, x => x.CorrelateById(context => context.Message.OrderId));
         Event(() => OrderShipped, x => x.CorrelateById(context => context.Message.OrderId));
-        Event(() => OrderPaymentReceived, x => x.CorrelateById(context => context.Message.OrderId));
+        Event(() => PaymentSucceeded, x =>
+        {
+            x.CorrelateById(context => context.Message.OrderId);
+            x.OnMissingInstance(m => m.ExecuteAsync(context =>
+                context.Publish(new RefundRequested(
+                    context.Message.OrderId,
+                    context.Message.OrderId,
+                    context.Message.PaymentId,
+                    0,
+                    RefundRemaining: true))));
+        });
+        Event(() => PaymentFailed, x => x.CorrelateById(context => context.Message.OrderId));
+        Event(() => PaymentRefunded, x => x.CorrelateById(context => context.Message.OrderId));
 
         Initially(
             When(OrderCreated)
@@ -86,16 +100,33 @@ public class OrderStateMachine : MassTransitStateMachine<OrderState>
             When(OrderCancelled).Finalize());
 
         During(AwaitingPayment,
-            When(OrderPaymentReceived)
+            When(PaymentSucceeded)
                 .ThenAsync(async context =>
                 {
                     await using var db = await orderDbFactory.CreateDbContextAsync(context.CancellationToken);
                     var order = await db.Orders.FirstOrDefaultAsync(
                         x => x.Id == context.Saga.CorrelationId, context.CancellationToken);
-                    if (order is null || order.Status != OrderStatus.Confirmed) return;
+                    if (order is null || order.Status != OrderStatus.Confirmed ||
+                        order.PaymentExpiresAt <= DateTime.UtcNow ||
+                        context.Message.Amount != order.TotalAmount ||
+                        context.Message.Amount <= 0)
+                    {
+                        await context.Publish(
+                            new RefundRequested(
+                                context.Message.OrderId,
+                                context.Message.OrderId,
+                                context.Message.PaymentId,
+                                0,
+                                RefundRemaining: true),
+                            context.CancellationToken);
+                        return;
+                    }
 
                     if (!order.IsPaid && order.TryMarkPaid())
+                    {
+                        order.PaymentId = context.Message.PaymentId;
                         await db.SaveChangesAsync(context.CancellationToken);
+                    }
                     context.Saga.PaymentAccepted = true;
                     await context.Publish(new OrderPaid(context.Saga.CorrelationId), context.CancellationToken);
                 })
@@ -103,6 +134,25 @@ public class OrderStateMachine : MassTransitStateMachine<OrderState>
                     context => context.Saga.PaymentAccepted,
                     accepted => accepted.TransitionTo(Paid),
                     rejected => rejected.Then(context => context.Saga.PaymentAccepted = false)),
+            When(PaymentFailed)
+                .Then(context => context.Saga.PaymentAccepted = false),
+            When(PaymentRefunded)
+                .ThenAsync(async context =>
+                {
+                    if (!context.Message.FullyRefunded) return;
+                    await using var db = await orderDbFactory.CreateDbContextAsync(context.CancellationToken);
+                    var order = await db.Orders.FirstOrDefaultAsync(
+                        x => x.Id == context.Saga.CorrelationId, context.CancellationToken);
+                    if (order is not null && order.Status == OrderStatus.Confirmed && order.TryCancel())
+                    {
+                        await db.SaveChangesAsync(context.CancellationToken);
+                        await context.Publish(new OrderCancelled(order.Id), context.CancellationToken);
+                    }
+                })
+                .IfElse(
+                    context => context.Message.FullyRefunded,
+                    refunded => refunded.Finalize(),
+                    partial => partial.Then(context => context.Saga.PaymentAccepted = false)),
             When(ReservationExpired)
                 .ThenAsync(async context =>
                 {
@@ -118,6 +168,19 @@ public class OrderStateMachine : MassTransitStateMachine<OrderState>
 
         During(Paid,
             Ignore(ReservationExpired),
+            When(PaymentRefunded)
+                .ThenAsync(async context =>
+                {
+                    if (!context.Message.FullyRefunded) return;
+                    await using var db = await orderDbFactory.CreateDbContextAsync(context.CancellationToken);
+                    var order = await db.Orders.FirstOrDefaultAsync(
+                        x => x.Id == context.Saga.CorrelationId, context.CancellationToken);
+                    if (order is not null && order.Status == OrderStatus.Confirmed && order.TryCancel())
+                    {
+                        await db.SaveChangesAsync(context.CancellationToken);
+                        await context.Publish(new OrderCancelled(order.Id), context.CancellationToken);
+                    }
+                }),
             When(OrderShipped).Finalize(),
             When(OrderCancelled).Finalize());
 
