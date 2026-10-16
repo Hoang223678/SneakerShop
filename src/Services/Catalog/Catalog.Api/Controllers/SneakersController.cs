@@ -1,19 +1,23 @@
+using Catalog.Api.Caching;
 using Catalog.Api.Data;
 using Catalog.Api.Domain;
 using Catalog.Api.Dtos;
 using Catalog.Api.Helpers;
+using Catalog.Api.Services;
 using MassTransit;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SneakerShop.BuildingBlocks;
 using SneakerShop.Contracts;
+using ZiggyCreatures.Caching.Fusion;
 
 namespace Catalog.Api.Controllers;
 
 [ApiController]
 [Route("api/sneakers")]
-public class SneakersController(CatalogDbContext db, IPublishEndpoint publisher) : ControllerBase
+public class SneakersController(
+    CatalogDbContext db, IPublishEndpoint publisher, IFusionCache cache, IBestSellerRanking ranking) : ControllerBase
 {
     /// <summary>Search and filter the catalog (active products only).</summary>
     [HttpGet]
@@ -22,6 +26,42 @@ public class SneakersController(CatalogDbContext db, IPublishEndpoint publisher)
         var page = Math.Max(1, q.Page);
         var pageSize = Math.Clamp(q.PageSize, 1, 100);
 
+        return await cache.GetOrSetAsync<PagedResult<SneakerListItem>>(
+            CatalogCacheKeys.SneakerList(q, page, pageSize),
+            token => QueryListAsync(q, page, pageSize, token),
+            CatalogCacheKeys.SneakerListDuration,
+            [CatalogCacheKeys.SneakerListTag],
+            ct);
+    }
+
+    /// <summary>Best-selling active sneakers over the last <paramref name="days"/> days (1-30), counted from shipped orders.</summary>
+    [HttpGet("best-sellers")]
+    public async Task<ActionResult<List<SneakerListItem>>> BestSellers(
+        [FromQuery] int days = 7, [FromQuery] int take = 10, CancellationToken ct = default)
+    {
+        days = Math.Clamp(days, 1, RedisBestSellerRanking.MaxDays);
+        take = Math.Clamp(take, 1, 50);
+
+        return await cache.GetOrSetAsync<List<SneakerListItem>>(
+            CatalogCacheKeys.BestSellers(days, take),
+            async token =>
+            {
+                // Ask for extra ids because inactive sneakers are dropped below.
+                var ids = await ranking.TopAsync(days, take * 2);
+                var items = await db.Sneakers.AsNoTracking()
+                    .Where(s => s.IsActive && ids.Contains(s.Id))
+                    .Select(s => new SneakerListItem(s.Id, s.Name, s.Slug, s.Brand.Name, s.Gender, s.Price, s.ImageUrl))
+                    .ToDictionaryAsync(s => s.Id, token);
+                return ids.Where(items.ContainsKey).Select(id => items[id]).Take(take).ToList();
+            },
+            CatalogCacheKeys.BestSellersDuration,
+            [CatalogCacheKeys.SneakerListTag],
+            ct);
+    }
+
+    private async Task<PagedResult<SneakerListItem>> QueryListAsync(
+        SneakerQuery q, int page, int pageSize, CancellationToken ct)
+    {
         var query = db.Sneakers.AsNoTracking().Where(s => s.IsActive);
 
         if (!string.IsNullOrWhiteSpace(q.Search))
@@ -55,16 +95,24 @@ public class SneakersController(CatalogDbContext db, IPublishEndpoint publisher)
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<SneakerDetail>> Get(Guid id, CancellationToken ct)
     {
-        var sneaker = await db.Sneakers.AsNoTracking()
-            .Include(s => s.Brand)
-            .Include(s => s.Variants)
-            .FirstOrDefaultAsync(s => s.Id == id, ct);
+        var sneaker = await cache.GetOrSetAsync<SneakerDetail?>(
+            CatalogCacheKeys.Sneaker(id),
+            async token =>
+            {
+                var entity = await db.Sneakers.AsNoTracking()
+                    .Include(s => s.Brand)
+                    .Include(s => s.Variants)
+                    .FirstOrDefaultAsync(s => s.Id == id, token);
+                return entity is null ? null : ToDetail(entity);
+            },
+            CatalogCacheKeys.SneakerDetailDuration,
+            ct);
 
         // Inactive (soft-deleted) products are only visible to admins.
         if (sneaker is null || (!sneaker.IsActive && !User.IsAdmin()))
             return NotFound();
 
-        return ToDetail(sneaker);
+        return sneaker;
     }
 
     [Authorize(Roles = Roles.Admin)]
@@ -92,6 +140,7 @@ public class SneakersController(CatalogDbContext db, IPublishEndpoint publisher)
 
         db.Sneakers.Add(sneaker);
         await db.SaveChangesAsync(ct);
+        await InvalidateAsync(sneaker.Id);
 
         var created = await db.Sneakers.AsNoTracking().Include(s => s.Brand).Include(s => s.Variants)
             .FirstAsync(s => s.Id == sneaker.Id, ct);
@@ -123,6 +172,7 @@ public class SneakersController(CatalogDbContext db, IPublishEndpoint publisher)
         sneaker.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
+        await InvalidateAsync(id);
 
         var updated = await db.Sneakers.AsNoTracking().Include(s => s.Brand).Include(s => s.Variants)
             .FirstAsync(s => s.Id == id, ct);
@@ -140,6 +190,7 @@ public class SneakersController(CatalogDbContext db, IPublishEndpoint publisher)
         sneaker.IsActive = false;
         sneaker.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+        await InvalidateAsync(id);
         return NoContent();
     }
 
@@ -161,10 +212,21 @@ public class SneakersController(CatalogDbContext db, IPublishEndpoint publisher)
         var variant = new SneakerVariant { SneakerId = id, Sku = sku, Size = request.Size, Color = color };
         db.Variants.Add(variant);
         await db.SaveChangesAsync(ct);
+        await InvalidateAsync(id);
 
         await publisher.Publish(new SneakerVariantCreated(variant.Id, id, variant.Sku), ct);
 
         return Created($"/api/sneakers/{id}", new VariantDto(variant.Id, variant.Sku, variant.Size, variant.Color));
+    }
+
+    /// <summary>
+    /// Runs after the database commit and ignores request cancellation, so a client disconnect cannot leave stale
+    /// entries behind. The FusionCache backplane forwards the removal to every other Catalog instance.
+    /// </summary>
+    private async Task InvalidateAsync(Guid sneakerId)
+    {
+        await cache.RemoveAsync(CatalogCacheKeys.Sneaker(sneakerId));
+        await cache.RemoveByTagAsync(CatalogCacheKeys.SneakerListTag);
     }
 
     private static SneakerDetail ToDetail(Sneaker s) => new(

@@ -70,7 +70,21 @@ public class OrderSagaIntegrationTests
                     IdempotencyKey = Guid.NewGuid().ToString("N"),
                     ShippingName = "Integration",
                     ShippingPhone = "0900000000",
-                    ShippingAddress = "Test address"
+                    ShippingAddress = "Test address",
+                    Items =
+                    {
+                        new OrderItem
+                        {
+                            VariantId = variantId,
+                            SneakerId = Guid.NewGuid(),
+                            SneakerName = "Test",
+                            Sku = "TEST-1",
+                            Size = 9,
+                            Color = "Black",
+                            UnitPrice = 10m,
+                            Quantity = 2
+                        }
+                    }
                 });
                 inventory.StockItems.Add(new StockItem
                 {
@@ -116,6 +130,14 @@ public class OrderSagaIntegrationTests
 
             await using (var scope = provider.CreateAsyncScope())
             {
+                var sagaFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<OrderSagaDbContext>>();
+                await using var sagas = await sagaFactory.CreateDbContextAsync();
+                var saga = await sagas.Set<OrderState>().SingleAsync(x => x.CorrelationId == orderId);
+                Assert.Equal(paymentExpiresAt, saga.ReservationDeadline);
+            }
+
+            await using (var scope = provider.CreateAsyncScope())
+            {
                 var inventoryFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<InventoryDbContext>>();
                 await using var inventory = await inventoryFactory.CreateDbContextAsync();
                 var reservation = await inventory.Reservations.SingleAsync(x => x.OrderId == orderId);
@@ -135,28 +157,10 @@ public class OrderSagaIntegrationTests
                 var inventoryFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<InventoryDbContext>>();
                 await using var inventory = await inventoryFactory.CreateDbContextAsync();
                 var orders = scope.ServiceProvider.GetRequiredService<OrderDbContext>();
-                return await orders.Orders.AnyAsync(x => x.Id == orderId && x.IsPaid) &&
+                return await orders.Orders.AnyAsync(x =>
+                           x.Id == orderId && x.IsPaid && x.Status == OrderStatus.Shipped) &&
                        await inventory.Reservations.AnyAsync(x =>
-                           x.OrderId == orderId && x.Status == ReservationStatus.Paid);
-            });
-
-            await using (var scope = provider.CreateAsyncScope())
-            {
-                var orders = scope.ServiceProvider.GetRequiredService<OrderDbContext>();
-                var order = await orders.Orders.SingleAsync(x => x.Id == orderId);
-                Assert.True(order.TryCancel());
-                await scope.ServiceProvider.GetRequiredService<IPublishEndpoint>()
-                    .Publish(new OrderCancelled(orderId));
-                await orders.SaveChangesAsync();
-            }
-
-            await WaitForAsync(async () =>
-            {
-                await using var scope = provider.CreateAsyncScope();
-                var inventoryFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<InventoryDbContext>>();
-                await using var inventory = await inventoryFactory.CreateDbContextAsync();
-                return await inventory.Reservations.AnyAsync(x =>
-                    x.OrderId == orderId && x.Status == ReservationStatus.Released);
+                           x.OrderId == orderId && x.Status == ReservationStatus.Committed);
             });
 
             var timedOutOrderId = Guid.NewGuid();

@@ -18,7 +18,7 @@ Authorization: Bearer <jwt>
 GET /api/inventory/{variantId}/availability
 ```
 
-Returns the current number of pairs available for a single variant.
+Returns the current number of pairs available for a single variant. Both availability endpoints are cached for 5 seconds for product pages; setting stock clears the entry. Reservations never use this cache.
 
 **200 OK**
 

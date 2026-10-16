@@ -3,7 +3,7 @@ using Payment.Api.Domain;
 
 namespace Payment.Api.Dtos;
 
-/// <summary>Starts or retries payment for a confirmed order.</summary>
+/// <summary>Starts or retries payment for a confirmed order. Use method <c>vnpay</c> for the VNPay sandbox URL.</summary>
 public sealed record CreatePaymentRequest
 {
     [Required]

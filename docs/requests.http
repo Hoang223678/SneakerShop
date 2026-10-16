@@ -72,7 +72,7 @@ Authorization: Bearer {{customerToken}}
 GET {{host}}/api/inventory?page=1&pageSize=5
 Authorization: Bearer {{adminToken}}
 
-### 7. Start payment using the local Fake provider
+### 7. Start payment (use "vnpay" for the VNPay sandbox URL)
 # @name createPayment
 POST {{host}}/api/payments
 Authorization: Bearer {{customerToken}}
@@ -80,7 +80,7 @@ Content-Type: application/json
 
 {
   "orderId": "{{orderId}}",
-  "method": "Fake"
+  "method": "vnpay"
 }
 
 ###

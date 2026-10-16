@@ -15,3 +15,16 @@ public class FaultAuditConsumer<T>(ILogger<FaultAuditConsumer<T>> logger) : ICon
         return Task.CompletedTask;
     }
 }
+
+public static class FaultAuditRegistration
+{
+    /// <summary>
+    /// Registers <see cref="FaultAuditConsumer{T}"/> on its own "{service}-{message}-fault" queue. The default name
+    /// would be the message name (e.g. "order-created"), which is the queue of the real consumer in another
+    /// service: both services would then compete for it and the one without a handler would skip the message.
+    /// </summary>
+    public static void AddFaultAudit<T>(this IBusRegistrationConfigurator x, string serviceName) where T : class =>
+        x.AddConsumer<FaultAuditConsumer<T>>()
+            .Endpoint(e => e.Name =
+                $"{serviceName}-{KebabCaseEndpointNameFormatter.Instance.SanitizeName(typeof(T).Name)}-fault");
+}

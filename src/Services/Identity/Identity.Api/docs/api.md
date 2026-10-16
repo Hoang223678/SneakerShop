@@ -67,6 +67,16 @@ Content-Type: application/json
 - The response is the same as registration: a JWT plus user profile.
 - Invalid credentials and unknown emails intentionally return the same `401 Unauthorized` message to avoid user enumeration.
 - Disabled accounts return `403 Forbidden`.
+- Five failed attempts for the same email within 15 minutes return `429 Too Many Requests` until that window ends, even with the correct password. A successful login resets the counter. The counter lives in Redis; while Redis is down, logins are not limited.
+
+### Logout
+
+```http
+POST /api/auth/logout
+Authorization: Bearer <jwt>
+```
+
+**204 No Content**. The token's `jti` is stored in Redis until the token expires, and every service rejects it with `401`. Returns `503` if Redis is unavailable (the token is then still valid).
 
 ### Current profile
 

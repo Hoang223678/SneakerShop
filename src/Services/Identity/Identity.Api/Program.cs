@@ -11,6 +11,7 @@ builder.Services.AddDbContext<AuthDbContext>(options =>
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddSingleton<ILoginAttemptLimiter, RedisLoginAttemptLimiter>();
 
 builder.Services.AddJwtAuth(builder.Configuration);
 builder.Services.AddApiDefaults();

@@ -1,8 +1,8 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 using Payment.Api.Domain;
 
@@ -13,9 +13,17 @@ public sealed class VnPayProvider(HttpClient http, IOptions<VnPayOptions> option
     private readonly VnPayOptions settings = options.Value;
     public string Name => "VnPay";
 
+    public void EnsureReady()
+    {
+        Required(settings.PaymentUrl, nameof(settings.PaymentUrl));
+        Required(settings.ReturnUrl, nameof(settings.ReturnUrl));
+        Required(settings.TmnCode, nameof(settings.TmnCode));
+        Required(settings.HashSecret, nameof(settings.HashSecret));
+    }
+
     public Task<string?> CreatePaymentAsync(PaymentAttempt attempt, PaymentRecord payment, string clientIp, CancellationToken ct)
     {
-        var values = new SortedDictionary<string, string>(StringComparer.Ordinal)
+        var values = SignedPairs(new Dictionary<string, string>
         {
             ["vnp_Amount"] = ToMinorUnits(payment.Amount),
             ["vnp_Command"] = "pay",
@@ -24,17 +32,16 @@ public sealed class VnPayProvider(HttpClient http, IOptions<VnPayOptions> option
             ["vnp_ExpireDate"] = ToVnPayDate(payment.ExpiresAt),
             ["vnp_IpAddr"] = NormalizeIp(clientIp),
             ["vnp_Locale"] = "vn",
-            ["vnp_OrderInfo"] = $"Payment for order {payment.OrderId:N}",
+            ["vnp_OrderInfo"] = $"Thanh toan don hang {payment.OrderId:N}",
             ["vnp_OrderType"] = "other",
             ["vnp_ReturnUrl"] = Required(settings.ReturnUrl, nameof(settings.ReturnUrl)),
             ["vnp_TmnCode"] = Required(settings.TmnCode, nameof(settings.TmnCode)),
             ["vnp_TxnRef"] = attempt.Id.ToString("N"),
             ["vnp_Version"] = "2.1.0"
-        };
-        values["vnp_SecureHash"] = Sign(values);
-        var queryValues = values.ToDictionary(pair => pair.Key, pair => (string?)pair.Value);
-        return Task.FromResult<string?>(QueryHelpers.AddQueryString(
-            Required(settings.PaymentUrl, nameof(settings.PaymentUrl)), queryValues));
+        });
+        var query = EncodeQuery(values);
+        var url = $"{Required(settings.PaymentUrl, nameof(settings.PaymentUrl))}?{query}&vnp_SecureHash={Sign(query)}";
+        return Task.FromResult<string?>(url);
     }
 
     public bool TryVerifyWebhook(IReadOnlyDictionary<string, string> payload, out VerifiedPaymentWebhook webhook)
@@ -46,15 +53,14 @@ public sealed class VnPayProvider(HttpClient http, IOptions<VnPayOptions> option
             string.IsNullOrWhiteSpace(payload.GetValueOrDefault("vnp_TransactionNo")) ||
             payload["vnp_TransactionNo"].Length > 100 ||
             payload.GetValueOrDefault("vnp_TmnCode") != settings.TmnCode ||
-            payload.GetValueOrDefault("vnp_CurrCode") != "VND" ||
+            (payload.GetValueOrDefault("vnp_CurrCode") is { Length: > 0 } currency && currency != "VND") ||
             (hashType is not null && hashType != "HmacSHA512") ||
             !long.TryParse(payload.GetValueOrDefault("vnp_Amount"), NumberStyles.None, CultureInfo.InvariantCulture, out var minorUnits))
             return false;
 
-        var unsigned = new SortedDictionary<string, string>(payload
+        var unsigned = SignedPairs(payload
             .Where(pair => pair.Key.StartsWith("vnp_", StringComparison.Ordinal) &&
-                           pair.Key is not ("vnp_SecureHash" or "vnp_SecureHashType"))
-            .ToDictionary(pair => pair.Key, pair => pair.Value), StringComparer.Ordinal);
+                           pair.Key is not ("vnp_SecureHash" or "vnp_SecureHashType")));
         if (!IsValidSignature(unsigned, suppliedHash))
             return false;
 
@@ -73,7 +79,7 @@ public sealed class VnPayProvider(HttpClient http, IOptions<VnPayOptions> option
 
     public async Task<ProviderPaymentStatus?> QueryStatusAsync(PaymentAttempt attempt, CancellationToken ct)
     {
-        var values = new SortedDictionary<string, string>(StringComparer.Ordinal)
+        var values = SignedPairs(new Dictionary<string, string>
         {
             ["vnp_Command"] = "querydr",
             ["vnp_CreateDate"] = ToVnPayDate(DateTime.UtcNow),
@@ -84,8 +90,8 @@ public sealed class VnPayProvider(HttpClient http, IOptions<VnPayOptions> option
             ["vnp_TransactionDate"] = ToVnPayDate(attempt.CreatedAt),
             ["vnp_TxnRef"] = attempt.Id.ToString("N"),
             ["vnp_Version"] = "2.1.0"
-        };
-        values["vnp_SecureHash"] = Sign(values);
+        });
+        values["vnp_SecureHash"] = Sign(EncodeQuery(values));
         using var response = await http.PostAsJsonAsync(
             Required(settings.QueryUrl, nameof(settings.QueryUrl)), values, ct);
         response.EnsureSuccessStatusCode();
@@ -112,7 +118,7 @@ public sealed class VnPayProvider(HttpClient http, IOptions<VnPayOptions> option
 
     public async Task RefundAsync(PaymentAttempt attempt, Guid refundId, decimal amount, CancellationToken ct)
     {
-        var values = new SortedDictionary<string, string>(StringComparer.Ordinal)
+        var values = SignedPairs(new Dictionary<string, string>
         {
             ["vnp_Amount"] = ToMinorUnits(amount),
             ["vnp_Command"] = "refund",
@@ -126,8 +132,8 @@ public sealed class VnPayProvider(HttpClient http, IOptions<VnPayOptions> option
             ["vnp_TransactionType"] = "02",
             ["vnp_TxnRef"] = attempt.Id.ToString("N"),
             ["vnp_Version"] = "2.1.0"
-        };
-        values["vnp_SecureHash"] = Sign(values);
+        });
+        values["vnp_SecureHash"] = Sign(EncodeQuery(values));
         using var response = await http.PostAsJsonAsync(Required(settings.RefundUrl, nameof(settings.RefundUrl)), values, ct);
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>(cancellationToken: ct)
@@ -136,26 +142,61 @@ public sealed class VnPayProvider(HttpClient http, IOptions<VnPayOptions> option
             throw new InvalidOperationException("VNPay rejected the refund request.");
     }
 
-    private string Sign(IEnumerable<KeyValuePair<string, string>> values)
+    private string Sign(string encodedQuery)
     {
-        var query = string.Join("&", values.Select(pair =>
-            $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value)}"));
         var key = Encoding.UTF8.GetBytes(Required(settings.HashSecret, nameof(settings.HashSecret)));
-        return Convert.ToHexString(HMACSHA512.HashData(key, Encoding.UTF8.GetBytes(query)));
+        return Convert.ToHexString(HMACSHA512.HashData(key, Encoding.UTF8.GetBytes(encodedQuery)))
+            .ToLowerInvariant();
     }
 
-    private bool IsValidSignature(IEnumerable<KeyValuePair<string, string>> values, string supplied)
+    private bool IsValidSignature(SortedDictionary<string, string> values, string supplied)
     {
         if (supplied.Length != 128) return false;
+        byte[] expected;
         try
         {
-            return CryptographicOperations.FixedTimeEquals(
-                Convert.FromHexString(Sign(values)),
-                Convert.FromHexString(supplied));
+            expected = Convert.FromHexString(supplied);
         }
         catch (FormatException)
         {
             return false;
+        }
+
+        // Sandbox return hashes may use WebUtility (+), RFC 3986 (%20), or raw pairs.
+        foreach (var query in new[]
+        {
+            EncodeQuery(values),
+            string.Join("&", values.Select(pair =>
+                $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value)}")),
+            string.Join("&", values.Select(pair => $"{pair.Key}={pair.Value}"))
+        })
+        {
+            if (CryptographicOperations.FixedTimeEquals(Convert.FromHexString(Sign(query)), expected))
+                return true;
+        }
+
+        return false;
+    }
+
+    // VNPay's official .NET sample: sort with en-US, URL-encode with WebUtility (space -> '+'), HMAC-SHA512 lowercase hex.
+    private static SortedDictionary<string, string> SignedPairs(IEnumerable<KeyValuePair<string, string>> values) =>
+        new(values.Where(pair => !string.IsNullOrEmpty(pair.Value)).ToDictionary(pair => pair.Key, pair => pair.Value),
+            VnPayKeyComparer.Instance);
+
+    private static string EncodeQuery(IEnumerable<KeyValuePair<string, string>> values) =>
+        string.Join("&", values.Select(pair =>
+            $"{WebUtility.UrlEncode(pair.Key)}={WebUtility.UrlEncode(pair.Value)}"));
+
+    private sealed class VnPayKeyComparer : IComparer<string>
+    {
+        public static readonly VnPayKeyComparer Instance = new();
+
+        public int Compare(string? x, string? y)
+        {
+            if (ReferenceEquals(x, y)) return 0;
+            if (x is null) return -1;
+            if (y is null) return 1;
+            return CompareInfo.GetCompareInfo("en-US").Compare(x, y, CompareOptions.Ordinal);
         }
     }
 
@@ -182,6 +223,7 @@ public sealed class VnPayOptions
     public string? QueryUrl { get; init; }
     public string? RefundUrl { get; init; }
     public string? ReturnUrl { get; init; }
+    public string? FrontendResultUrl { get; init; }
     public string? TmnCode { get; init; }
     public string? HashSecret { get; init; }
 }

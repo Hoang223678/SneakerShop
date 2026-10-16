@@ -51,7 +51,7 @@ public class OrdersController(IOrderService orders) : ControllerBase
     public async Task<ActionResult<OrderDto>> Cancel(Guid id, CancellationToken ct) =>
         await orders.CancelAsync(id, User.GetUserId(), User.IsAdmin(), ct);
 
-    /// <summary>Admin: mark a Confirmed order as Shipped, or a Shipped order as Delivered.</summary>
+    /// <summary>Admin: mark a Shipped order as Delivered. Successful payment already moves the order to Shipped.</summary>
     [Authorize(Roles = Roles.Admin)]
     [HttpPut("{id:guid}/status")]
     public async Task<ActionResult<OrderDto>> UpdateStatus(Guid id, UpdateOrderStatusRequest request, CancellationToken ct) =>

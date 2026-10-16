@@ -23,7 +23,7 @@ public class CreateOrderItem
     [Required]
     public Guid VariantId { get; set; }
 
-    [Range(1, 10)]
+    [Range(1, 1_000_000)]
     public int Quantity { get; set; }
 }
 

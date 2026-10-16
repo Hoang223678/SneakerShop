@@ -27,6 +27,9 @@ builder.Services.AddDbContextFactory<OrderSagaDbContext>(options =>
 builder.Services.AddHostedService<OrderSagaTimeoutService>();
 
 builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddSingleton<RedisFlashSaleService>();
+builder.Services.AddSingleton<IFlashSaleGate>(sp => sp.GetRequiredService<RedisFlashSaleService>());
+builder.Services.AddSingleton<IFlashSaleAdmin>(sp => sp.GetRequiredService<RedisFlashSaleService>());
 
 // Typed HTTP client for the Catalog service's internal endpoint.
 builder.Services.AddHttpClient<ICatalogClient, CatalogClient>(client =>
@@ -40,16 +43,16 @@ builder.Services.AddHttpClient<ICatalogClient, CatalogClient>(client =>
 builder.Services.AddJwtAuth(builder.Configuration);
 builder.Services.AddMessaging(builder.Configuration, x =>
 {
-    x.AddConsumer<FaultAuditConsumer<OrderCreated>>();
-    x.AddConsumer<FaultAuditConsumer<StockReserved>>();
-    x.AddConsumer<FaultAuditConsumer<StockReservationFailed>>();
-    x.AddConsumer<FaultAuditConsumer<OrderReservationTimedOut>>();
-    x.AddConsumer<FaultAuditConsumer<OrderReservationExpired>>();
-    x.AddConsumer<FaultAuditConsumer<PaymentSucceeded>>();
-    x.AddConsumer<FaultAuditConsumer<PaymentFailed>>();
-    x.AddConsumer<FaultAuditConsumer<PaymentRefunded>>();
-    x.AddConsumer<FaultAuditConsumer<OrderCancelled>>();
-    x.AddConsumer<FaultAuditConsumer<OrderShipped>>();
+    x.AddFaultAudit<OrderCreated>("ordering");
+    x.AddFaultAudit<StockReserved>("ordering");
+    x.AddFaultAudit<StockReservationFailed>("ordering");
+    x.AddFaultAudit<OrderReservationTimedOut>("ordering");
+    x.AddFaultAudit<OrderReservationExpired>("ordering");
+    x.AddFaultAudit<PaymentSucceeded>("ordering");
+    x.AddFaultAudit<PaymentFailed>("ordering");
+    x.AddFaultAudit<PaymentRefunded>("ordering");
+    x.AddFaultAudit<OrderCancelled>("ordering");
+    x.AddFaultAudit<OrderShipped>("ordering");
     x.AddEntityFrameworkOutbox<OrderDbContext>(o =>
     {
         o.UseSqlServer();

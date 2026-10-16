@@ -19,7 +19,8 @@ public interface IOrderService
     Task<OrderDto> UpdateStatusAsync(Guid orderId, OrderStatus newStatus, CancellationToken ct);
 }
 
-public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEndpoint publisher) : IOrderService
+public class OrderService(
+    OrderDbContext db, ICatalogClient catalog, IPublishEndpoint publisher, IFlashSaleGate flashSales) : IOrderService
 {
     public async Task<OrderDto> CreateAsync(Guid userId, CreateOrderRequest request, string idempotencyKey, CancellationToken ct)
     {
@@ -33,9 +34,27 @@ public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEnd
             .Select(g => new OrderLine(g.Key, g.Sum(i => i.Quantity)))
             .ToList();
 
-        if (lines.Any(l => l.Quantity > 10))
-            throw new AppException(StatusCodes.Status400BadRequest, "You can order at most 10 pairs of the same variant.");
+        if (lines.Any(l => l.Quantity > 1_000_000))
+            throw new AppException(StatusCodes.Status400BadRequest, "You can order at most 1000000 pairs of the same variant.");
 
+        var ticket = await flashSales.TryAdmitAsync(lines)
+            ?? throw new AppException(StatusCodes.Status409Conflict, "This flash sale is sold out.");
+        var created = false;
+        try
+        {
+            (var order, created) = await PlaceAsync(userId, request, idempotencyKey, lines, ct);
+            return order.ToDto();
+        }
+        finally
+        {
+            if (!created) await flashSales.ReleaseAsync(ticket);
+        }
+    }
+
+    /// <summary>Returns the order and whether this call created it (false when a concurrent retry won the race).</summary>
+    private async Task<(Order Order, bool Created)> PlaceAsync(
+        Guid userId, CreateOrderRequest request, string idempotencyKey, List<OrderLine> lines, CancellationToken ct)
+    {
         // Never trust prices from the client: ask Catalog for the real name/price of every variant.
         var variants = (await catalog.LookupAsync(lines.Select(l => l.VariantId).ToList(), ct))
             .ToDictionary(v => v.VariantId);
@@ -87,10 +106,10 @@ public class OrderService(OrderDbContext db, ICatalogClient catalog, IPublishEnd
             var concurrentOrder = await db.Orders.AsNoTracking().Include(o => o.Items)
                 .FirstOrDefaultAsync(o => o.UserId == userId && o.IdempotencyKey == idempotencyKey, ct);
             if (concurrentOrder is null) throw;
-            return concurrentOrder.ToDto();
+            return (concurrentOrder, false);
         }
 
-        return order.ToDto();
+        return (order, true);
     }
 
     public async Task<OrderDto> GetAsync(Guid orderId, Guid userId, bool isAdmin, CancellationToken ct)

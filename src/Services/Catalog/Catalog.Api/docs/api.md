@@ -121,6 +121,18 @@ Returns sneaker details, brand, and size/color variants. Inactive sneakers retur
 
 **404 Not Found** is returned when the sneaker does not exist or is inactive and the caller is not an admin.
 
+### Best sellers
+
+```http
+GET /api/sneakers/best-sellers?days=7&take=10
+```
+
+Active sneakers with the most pairs shipped over the last `days` days (1-30, default 7), best first, as `SneakerListItem`s. Counted from `OrderShipped` events into one Redis sorted set per day. Cached for 1 minute.
+
+### Caching
+
+Brands (30 minutes), sneaker lists (5 minutes) and sneaker details (10 minutes) are cached in memory and Redis (FusionCache). Admin writes remove the affected entries on every Catalog instance. The internal variant lookup used for order prices is never cached.
+
 ### Create a sneaker
 
 ```http

@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Options;
 using Payment.Api.Dtos;
+using Payment.Api.Providers;
 using Payment.Api.Services;
 using SneakerShop.BuildingBlocks;
 
@@ -10,9 +13,9 @@ namespace Payment.Api.Controllers;
 [ApiController]
 [Route("api/payments")]
 [Authorize]
-public sealed class PaymentsController(IPaymentService payments) : ControllerBase
+public sealed class PaymentsController(IPaymentService payments, IOptions<VnPayOptions> vnPay) : ControllerBase
 {
-    /// <summary>Create a payment or a new attempt for a confirmed order.</summary>
+    /// <summary>Create a payment for a confirmed order. Method <c>vnpay</c> returns a VNPay sandbox checkout URL.</summary>
     [HttpPost]
     [ProducesResponseType<PaymentResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
@@ -57,7 +60,7 @@ public sealed class PaymentsController(IPaymentService payments) : ControllerBas
         return AcceptedAtAction(nameof(Get), new { id }, response);
     }
 
-    /// <summary>VNPay IPN endpoint. A browser return URL never changes payment state.</summary>
+    /// <summary>VNPay server-to-server IPN. Confirms the signed payment result.</summary>
     [AllowAnonymous]
     [EnableRateLimiting("payment-webhook")]
     [HttpGet("webhooks/vnpay")]
@@ -68,6 +71,47 @@ public sealed class PaymentsController(IPaymentService payments) : ControllerBas
         var payload = Request.Query.ToDictionary(x => x.Key, x => x.Value.ToString());
         await payments.ProcessWebhookAsync("VnPay", payload, ct);
         return Ok(new { RspCode = "00", Message = "Confirm Success" });
+    }
+
+    /// <summary>VNPay sandbox browser return. Verifies the signed query then redirects to the frontend.</summary>
+    [AllowAnonymous]
+    [EnableRateLimiting("payment-webhook")]
+    [HttpGet("vnpay/return")]
+    public async Task<IActionResult> VnPayReturn(CancellationToken ct)
+    {
+        var payload = Request.Query.ToDictionary(x => x.Key, x => x.Value.ToString());
+        var succeeded = false;
+        try
+        {
+            await payments.ProcessWebhookAsync("VnPay", payload, ct);
+            succeeded = payload.GetValueOrDefault("vnp_ResponseCode") == "00"
+                && payload.GetValueOrDefault("vnp_TransactionStatus") == "00";
+        }
+        catch (AppException)
+        {
+            succeeded = false;
+        }
+
+        var frontend = vnPay.Value.FrontendResultUrl;
+        var status = succeeded ? "success" : "failed";
+        var attemptId = payload.GetValueOrDefault("vnp_TxnRef");
+        if (!string.IsNullOrWhiteSpace(frontend))
+            return Redirect(QueryHelpers.AddQueryString(frontend, new Dictionary<string, string?>
+            {
+                ["status"] = status,
+                ["attemptId"] = attemptId
+            }));
+
+        return Content(
+            $"""
+            <!doctype html>
+            <html lang="vi"><head><meta charset="utf-8"><title>Kết quả thanh toán</title></head>
+            <body style="font-family:sans-serif;max-width:40rem;margin:4rem auto">
+            <h1>{(succeeded ? "Thanh toán thành công" : "Thanh toán chưa được xác nhận")}</h1>
+            <p>Mã giao dịch: {System.Net.WebUtility.HtmlEncode(attemptId)}</p>
+            </body></html>
+            """,
+            "text/html");
     }
 
     /// <summary>Development-only helper for completing a fake payment.</summary>

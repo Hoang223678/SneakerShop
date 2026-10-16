@@ -31,8 +31,18 @@ public class OrderStateMachine : MassTransitStateMachine<OrderState>
         InstanceState(x => x.CurrentState);
 
         Event(() => OrderCreated, x => x.CorrelateById(context => context.Message.OrderId));
-        Event(() => StockReserved, x => x.CorrelateById(context => context.Message.OrderId));
-        Event(() => StockReservationFailed, x => x.CorrelateById(context => context.Message.OrderId));
+        Event(() => StockReserved, x =>
+        {
+            x.CorrelateById(context => context.Message.OrderId);
+            x.OnMissingInstance(m => m.ExecuteAsync(context =>
+                RepublishUntilSagaExists(context, context.Message)));
+        });
+        Event(() => StockReservationFailed, x =>
+        {
+            x.CorrelateById(context => context.Message.OrderId);
+            x.OnMissingInstance(m => m.ExecuteAsync(context =>
+                RepublishUntilSagaExists(context, context.Message)));
+        });
         Event(() => ReservationTimedOut, x => x.CorrelateById(context => context.Message.OrderId));
         Event(() => ReservationExpired, x => x.CorrelateById(context => context.Message.OrderId));
         Event(() => OrderCancelled, x => x.CorrelateById(context => context.Message.OrderId));
@@ -53,7 +63,7 @@ public class OrderStateMachine : MassTransitStateMachine<OrderState>
 
         Initially(
             When(OrderCreated)
-                .Then(context => context.Saga.ReservationDeadline = DateTime.UtcNow.AddMinutes(2))
+                .Then(context => context.Saga.ReservationDeadline = context.Message.PaymentExpiresAt)
                 .TransitionTo(AwaitingReservation));
 
         During(AwaitingReservation,
@@ -104,7 +114,7 @@ public class OrderStateMachine : MassTransitStateMachine<OrderState>
                 .ThenAsync(async context =>
                 {
                     await using var db = await orderDbFactory.CreateDbContextAsync(context.CancellationToken);
-                    var order = await db.Orders.FirstOrDefaultAsync(
+                    var order = await db.Orders.Include(x => x.Items).FirstOrDefaultAsync(
                         x => x.Id == context.Saga.CorrelationId, context.CancellationToken);
                     if (order is null || order.Status != OrderStatus.Confirmed ||
                         order.PaymentExpiresAt <= DateTime.UtcNow ||
@@ -123,12 +133,17 @@ public class OrderStateMachine : MassTransitStateMachine<OrderState>
                     }
 
                     if (!order.IsPaid && order.TryMarkPaid())
-                    {
                         order.PaymentId = context.Message.PaymentId;
-                        await db.SaveChangesAsync(context.CancellationToken);
-                    }
+
+                    var shipped = order.TryShip();
+                    await db.SaveChangesAsync(context.CancellationToken);
                     context.Saga.PaymentAccepted = true;
                     await context.Publish(new OrderPaid(context.Saga.CorrelationId), context.CancellationToken);
+                    if (shipped)
+                    {
+                        var lines = order.Items.Select(i => new OrderLine(i.VariantId, i.Quantity)).ToList();
+                        await context.Publish(new OrderShipped(order.Id, lines), context.CancellationToken);
+                    }
                 })
                 .IfElse(
                     context => context.Saga.PaymentAccepted,
@@ -185,5 +200,21 @@ public class OrderStateMachine : MassTransitStateMachine<OrderState>
             When(OrderCancelled).Finalize());
 
         SetCompletedWhenFinalized();
+    }
+
+    // Inventory can reserve and publish StockReserved before this saga has processed OrderCreated.
+    // Re-publish a few times so the confirmation is not dropped.
+    private static async Task RepublishUntilSagaExists<T>(ConsumeContext<T> context, T message)
+        where T : class
+    {
+        var attempt = context.Headers.Get<string>("x-missing-saga-retry") is { } raw
+            && int.TryParse(raw, out var parsed)
+            ? parsed
+            : 0;
+        if (attempt >= 15)
+            return;
+
+        await Task.Delay(TimeSpan.FromMilliseconds(200 * (attempt + 1)), context.CancellationToken);
+        await context.Publish(message, pipe => pipe.Headers.Set("x-missing-saga-retry", (attempt + 1).ToString()));
     }
 }

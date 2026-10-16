@@ -1,8 +1,10 @@
 using System.Security.Claims;
+using Catalog.Api.Consumers;
 using Catalog.Api.Controllers;
 using Catalog.Api.Data;
 using Catalog.Api.Domain;
 using Catalog.Api.Dtos;
+using Catalog.Api.Services;
 using MassTransit;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -12,6 +14,7 @@ using Moq;
 using SneakerShop.BuildingBlocks;
 using SneakerShop.Contracts;
 using Xunit;
+using ZiggyCreatures.Caching.Fusion;
 
 namespace Catalog.Api.Tests;
 
@@ -19,6 +22,8 @@ public sealed class CatalogControllerTests : IDisposable
 {
     private readonly CatalogDbContext _db;
     private readonly Mock<IPublishEndpoint> _publisher = new();
+    private readonly FusionCache _cache = new(new FusionCacheOptions());
+    private readonly FakeRanking _ranking = new();
     private readonly Brand _brand;
 
     public CatalogControllerTests()
@@ -38,9 +43,84 @@ public sealed class CatalogControllerTests : IDisposable
         _db.Brands.Add(new Brand { Name = "Adidas", Slug = "adidas" });
         await _db.SaveChangesAsync();
 
-        var result = await new BrandsController(_db).List(default);
+        var result = await Brands().List(default);
 
         Assert.Equal(new[] { "Adidas", "Nike" }, result.Value!.Select(brand => brand.Name));
+    }
+
+    [Fact]
+    public async Task ListBrands_IsRefreshedAfterBrandIsCreated()
+    {
+        Assert.Single((await Brands().List(default)).Value!);
+
+        await Brands().Create(new CreateBrandRequest { Name = "Adidas" }, default);
+
+        Assert.Equal(2, (await Brands().List(default)).Value!.Count);
+    }
+
+    [Fact]
+    public async Task GetSneaker_ServesCachedDetailUntilAdminUpdatesIt()
+    {
+        var sneaker = await AddSneaker("Air Zoom", 120m);
+        await Sneakers().Get(sneaker.Id, default);
+
+        sneaker.Price = 1m; // written behind the API's back: the cached copy must still be served
+        await _db.SaveChangesAsync();
+        Assert.Equal(120m, (await Sneakers().Get(sneaker.Id, default)).Value!.Price);
+
+        await Sneakers().Update(sneaker.Id, new SneakerUpsertRequest
+        {
+            Name = "Air Zoom",
+            BrandId = _brand.Id,
+            Price = 150m
+        }, default);
+
+        Assert.Equal(150m, (await Sneakers().Get(sneaker.Id, default)).Value!.Price);
+    }
+
+    [Fact]
+    public async Task ListSneakers_IsRefreshedAfterSneakerIsDeleted()
+    {
+        var sneaker = await AddSneaker("Air Zoom", 120m);
+        Assert.Equal(1, (await Sneakers().List(new SneakerQuery(), default)).Value!.TotalCount);
+
+        await Sneakers().Delete(sneaker.Id, default);
+
+        Assert.Equal(0, (await Sneakers().List(new SneakerQuery(), default)).Value!.TotalCount);
+    }
+
+    [Fact]
+    public async Task BestSellers_ReturnsActiveSneakersInRankingOrder()
+    {
+        var first = await AddSneaker("Air Zoom", 120m);
+        var retired = await AddSneaker("Retired shoe", 90m, active: false);
+        var second = await AddSneaker("Court Legacy", 80m);
+        _ranking.Top = [first.Id, retired.Id, second.Id];
+
+        var result = await Sneakers().BestSellers(days: 7, take: 10, default);
+
+        Assert.Equal(new[] { first.Id, second.Id }, result.Value!.Select(item => item.Id));
+    }
+
+    [Fact]
+    public async Task BestSellerConsumer_CountsShippedPairsPerSneaker()
+    {
+        var sneaker = await AddSneaker("Air Zoom", 120m);
+        var size9 = new SneakerVariant { SneakerId = sneaker.Id, Sneaker = sneaker, Sku = "AZ-9", Size = 9m, Color = "Blue" };
+        var size10 = new SneakerVariant { SneakerId = sneaker.Id, Sneaker = sneaker, Sku = "AZ-10", Size = 10m, Color = "Blue" };
+        _db.Variants.AddRange(size9, size10);
+        await _db.SaveChangesAsync();
+        var orderId = Guid.NewGuid();
+        var context = new Mock<ConsumeContext<OrderShipped>>();
+        context.SetupGet(c => c.Message).Returns(new OrderShipped(orderId,
+            [new OrderLine(size9.Id, 2), new OrderLine(size10.Id, 1), new OrderLine(Guid.NewGuid(), 5)]));
+
+        await new BestSellerRankingConsumer(_db, _ranking).Consume(context.Object);
+
+        var (recordedOrder, pairs) = Assert.Single(_ranking.Recorded);
+        Assert.Equal(orderId, recordedOrder);
+        Assert.Equal(3, pairs[sneaker.Id]);
+        Assert.Single(pairs);
     }
 
     [Fact]
@@ -63,7 +143,7 @@ public sealed class CatalogControllerTests : IDisposable
     [Fact]
     public async Task CreateBrand_TrimsNameAndBuildsSlug()
     {
-        var result = await new BrandsController(_db).Create(new CreateBrandRequest { Name = "  New Balance  " }, default);
+        var result = await Brands().Create(new CreateBrandRequest { Name = "  New Balance  " }, default);
 
         var created = Assert.IsType<CreatedAtActionResult>(result.Result);
         var brand = Assert.IsType<BrandDto>(created.Value);
@@ -75,7 +155,7 @@ public sealed class CatalogControllerTests : IDisposable
     public async Task CreateBrand_RejectsDuplicateName()
     {
         var exception = await Assert.ThrowsAsync<AppException>(() =>
-            new BrandsController(_db).Create(new CreateBrandRequest { Name = " Nike " }, default));
+            Brands().Create(new CreateBrandRequest { Name = " Nike " }, default));
 
         Assert.Equal(StatusCodes.Status409Conflict, exception.StatusCode);
     }
@@ -264,7 +344,7 @@ public sealed class CatalogControllerTests : IDisposable
     {
         var role = isAdmin ? Roles.Admin : Roles.Customer;
         var identity = new ClaimsIdentity([new Claim(ClaimTypes.Role, role)], "test");
-        return new SneakersController(_db, _publisher.Object)
+        return new SneakersController(_db, _publisher.Object, _cache, _ranking)
         {
             ControllerContext = new ControllerContext
             {
@@ -272,6 +352,8 @@ public sealed class CatalogControllerTests : IDisposable
             }
         };
     }
+
+    private BrandsController Brands() => new(_db, _cache);
 
     private async Task<Sneaker> AddSneaker(string name, decimal price, bool active = true)
     {
@@ -297,5 +379,23 @@ public sealed class CatalogControllerTests : IDisposable
         Assert.Equal(Roles.Admin, authorize.Roles);
     }
 
-    public void Dispose() => _db.Dispose();
+    public void Dispose()
+    {
+        _cache.Dispose();
+        _db.Dispose();
+    }
+
+    private sealed class FakeRanking : IBestSellerRanking
+    {
+        public IReadOnlyList<Guid> Top { get; set; } = [];
+        public List<(Guid OrderId, IReadOnlyDictionary<Guid, int> Pairs)> Recorded { get; } = [];
+
+        public Task RecordSaleAsync(Guid orderId, IReadOnlyDictionary<Guid, int> pairsBySneaker, DateTime soldAtUtc)
+        {
+            Recorded.Add((orderId, pairsBySneaker));
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<Guid>> TopAsync(int days, int take) => Task.FromResult(Top);
+    }
 }

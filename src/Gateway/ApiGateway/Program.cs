@@ -1,4 +1,6 @@
 using System.Threading.RateLimiting;
+using RedisRateLimiting;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,28 +14,19 @@ var origins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>()
 builder.Services.AddCors(options => options.AddPolicy("frontend", policy =>
     policy.WithOrigins(origins).AllowAnyHeader().AllowAnyMethod()));
 
-// Simple per-IP rate limit (100 requests / minute). Applied to routes via "RateLimiterPolicy": "per-ip".
+var redisOptions = ConfigurationOptions.Parse(builder.Configuration.GetConnectionString("Redis")
+    ?? throw new InvalidOperationException("ConnectionStrings:Redis is not configured."));
+redisOptions.AbortOnConnectFail = false;
+redisOptions.BacklogPolicy = BacklogPolicy.FailFast;
+var redis = ConnectionMultiplexer.Connect(redisOptions);
+
+// Per-IP limits applied to routes via "RateLimiterPolicy". Counters live in Redis so every gateway replica
+// shares them; while Redis is unreachable each replica falls back to its own in-memory counter.
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddPolicy("per-ip", httpContext =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 100,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            }));
-    options.AddPolicy("payment-webhook", httpContext =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 60,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            }));
+    options.AddPolicy("per-ip", httpContext => PerIpLimit(httpContext, "per-ip", permitsPerMinute: 100));
+    options.AddPolicy("payment-webhook", httpContext => PerIpLimit(httpContext, "payment-webhook", permitsPerMinute: 60));
 });
 
 builder.Services.AddHealthChecks();
@@ -48,3 +41,25 @@ app.MapGet("/", () => Results.Ok(new { service = "Sneaker Shop API Gateway", sta
 app.MapReverseProxy();
 
 app.Run();
+
+RateLimitPartition<string> PerIpLimit(HttpContext httpContext, string policy, int permitsPerMinute)
+{
+    var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var window = TimeSpan.FromMinutes(1);
+
+    return redis.IsConnected
+        ? RedisRateLimitPartition.GetFixedWindowRateLimiter($"gateway:v1:{policy}:{ip}", _ =>
+            new RedisFixedWindowRateLimiterOptions
+            {
+                ConnectionMultiplexerFactory = () => redis,
+                PermitLimit = permitsPerMinute,
+                Window = window
+            })
+        : RateLimitPartition.GetFixedWindowLimiter($"local:{policy}:{ip}", _ =>
+            new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = permitsPerMinute,
+                Window = window,
+                QueueLimit = 0
+            });
+}

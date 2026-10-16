@@ -4,17 +4,23 @@ using MassTransit;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using SneakerShop.BuildingBlocks.Caching;
 
 namespace SneakerShop.BuildingBlocks;
 
 public static class ServiceCollectionExtensions
 {
-    /// <summary>Validates JWTs issued by the Identity service. All services share the same key/issuer/audience.</summary>
+    /// <summary>
+    /// Validates JWTs issued by the Identity service. All services share the same key/issuer/audience,
+    /// and reject tokens revoked by logout (checked in Redis).
+    /// </summary>
     public static IServiceCollection AddJwtAuth(this IServiceCollection services, IConfiguration config)
     {
         var key = config["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is not configured.");
+        services.AddRedis(config);
 
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
@@ -33,10 +39,30 @@ public static class ServiceCollectionExtensions
                     NameClaimType = "name",
                     RoleClaimType = "role"
                 };
+                options.Events = new JwtBearerEvents { OnTokenValidated = RejectRevokedTokenAsync };
             });
 
         services.AddAuthorization();
         return services;
+    }
+
+    /// <summary>Fails open while Redis is unreachable: tokens are short-lived, and blocking every request would be worse.</summary>
+    private static async Task RejectRevokedTokenAsync(TokenValidatedContext context)
+    {
+        var jti = context.Principal?.FindFirst("jti")?.Value;
+        if (jti is null) return;
+
+        var services = context.HttpContext.RequestServices;
+        try
+        {
+            if (await services.GetRequiredService<ITokenRevocationStore>().IsRevokedAsync(jti))
+                context.Fail("The access token has been revoked.");
+        }
+        catch (Exception exception) when (exception.IsRedisFailure())
+        {
+            services.GetRequiredService<ILoggerFactory>().CreateLogger("SneakerShop.Auth")
+                .LogWarning(exception, "Skipped the token revocation check because Redis is unavailable.");
+        }
     }
 
     /// <summary>Global exception handler (ProblemDetails) and health checks.</summary>

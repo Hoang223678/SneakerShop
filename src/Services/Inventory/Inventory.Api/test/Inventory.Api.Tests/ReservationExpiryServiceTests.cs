@@ -16,8 +16,9 @@ public sealed class ReservationExpiryServiceTests
     [Fact]
     public async Task ProcessExpiredReservationsAsync_ReleasesReservedStockAndPublishesExpiryEvent()
     {
+        var databaseName = Guid.NewGuid().ToString();
         var options = new DbContextOptionsBuilder<InventoryDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .UseInMemoryDatabase(databaseName)
             .Options;
 
         var variantId = Guid.NewGuid();
@@ -52,7 +53,7 @@ public sealed class ReservationExpiryServiceTests
 
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContext<InventoryDbContext>(builder => builder.UseInMemoryDatabase(options.Database.GetDbConnection()?.Database ?? "inventory-tests"));
+        services.AddDbContext<InventoryDbContext>(builder => builder.UseInMemoryDatabase(databaseName));
         services.AddSingleton<IPublishEndpoint>(publisher.Object);
 
         var provider = services.BuildServiceProvider();

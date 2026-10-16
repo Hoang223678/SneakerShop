@@ -6,6 +6,8 @@ public sealed class FakePaymentProvider : IPaymentProvider
 {
     public string Name => "Fake";
 
+    public void EnsureReady() { }
+
     public Task<string?> CreatePaymentAsync(PaymentAttempt attempt, PaymentRecord payment, string clientIp, CancellationToken ct) =>
         Task.FromResult<string?>(null);
 

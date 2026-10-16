@@ -3,15 +3,15 @@
 Each microservice owns its own database (**database-per-service**). No SQL foreign keys cross databases:
 services only share IDs (e.g. `VariantId`) and talk through HTTP and events.
 
-You do **not** need these scripts to run the project: every service creates its own schema and seed data
-on first start (`EnsureCreated`). Use the scripts if you prefer to create the databases yourself
-or want to inspect the schema.
+You do **not** need to run these scripts manually with Docker Compose: the `database-init` service creates
+the service databases, and the APIs apply their EF Core migrations and seed data on first start.
+Use the scripts if you want to create the databases yourself or inspect the schema.
 
 ## Run order
 
 | # | Script | Purpose |
 |---|--------|---------|
-| 0 | `00-create-databases.sql` | Creates the 4 databases |
+| 0 | `00-create-databases.sql` | Creates the 5 databases |
 | 1 | `01-identity-schema.sql` | Users |
 | 2 | `02-catalog-schema.sql` | Brands, Sneakers, SneakerVariants |
 | 3 | `03-catalog-seed.sql` | 4 brands, 6 sneakers, 24 variants |
@@ -20,7 +20,7 @@ or want to inspect the schema.
 | 6 | `06-ordering-schema.sql` | Orders, OrderItems |
 
 ```bash
-sqlcmd -C -S localhost,1433 -U sa -P "Sneaker_Shop123" -i 00-create-databases.sql
+sqlcmd -C -S localhost,1433 -U sa -P "12345" -i 00-create-databases.sql
 # ...then the remaining files in order
 ```
 

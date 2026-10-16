@@ -6,12 +6,17 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SneakerShop.BuildingBlocks;
+using SneakerShop.BuildingBlocks.Caching;
 
 namespace Identity.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(AuthDbContext db, ITokenService tokens) : ControllerBase
+public class AuthController(
+    AuthDbContext db,
+    ITokenService tokens,
+    ILoginAttemptLimiter loginAttempts,
+    ITokenRevocationStore revocations) : ControllerBase
 {
     /// <summary>Register a new customer account.</summary>
     [HttpPost("register")]
@@ -36,21 +41,52 @@ public class AuthController(AuthDbContext db, ITokenService tokens) : Controller
         return Ok(BuildResponse(user));
     }
 
-    /// <summary>Exchange email + password for a JWT access token.</summary>
+    /// <summary>Exchange email + password for a JWT access token. Five failures in 15 minutes lock the email temporarily.</summary>
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request, CancellationToken ct)
     {
         var email = request.Email.Trim().ToLowerInvariant();
+
+        var lockout = await loginAttempts.GetLockoutAsync(email);
+        if (lockout is not null)
+            throw new AppException(StatusCodes.Status429TooManyRequests,
+                $"Too many failed login attempts. Try again in {Math.Max(1, (int)Math.Ceiling(lockout.Value.TotalMinutes))} minute(s).");
+
         var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email, ct);
 
         // Same message for unknown email and wrong password to avoid account enumeration.
         if (user is null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+        {
+            await loginAttempts.RecordFailureAsync(email);
             throw new AppException(StatusCodes.Status401Unauthorized, "Invalid email or password.");
+        }
 
         if (!user.IsActive)
             throw new AppException(StatusCodes.Status403Forbidden, "This account is disabled.");
 
+        await loginAttempts.ResetAsync(email);
         return Ok(BuildResponse(user));
+    }
+
+    /// <summary>Revoke the current access token. Every service rejects it from now until it would have expired.</summary>
+    [Authorize]
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout()
+    {
+        var jti = User.FindFirst("jti")?.Value;
+        if (jti is null || !long.TryParse(User.FindFirst("exp")?.Value, out var expiresAtUnix))
+            throw new AppException(StatusCodes.Status401Unauthorized, "Invalid access token.");
+
+        try
+        {
+            await revocations.RevokeAsync(jti, DateTimeOffset.FromUnixTimeSeconds(expiresAtUnix).UtcDateTime);
+        }
+        catch (Exception exception) when (exception.IsRedisFailure())
+        {
+            throw new AppException(StatusCodes.Status503ServiceUnavailable, "Logout is temporarily unavailable. Please try again.");
+        }
+
+        return NoContent();
     }
 
     /// <summary>Profile of the authenticated user.</summary>

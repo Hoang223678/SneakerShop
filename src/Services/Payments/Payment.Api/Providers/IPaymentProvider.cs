@@ -5,6 +5,7 @@ namespace Payment.Api.Providers;
 public interface IPaymentProvider
 {
     string Name { get; }
+    void EnsureReady();
     Task<string?> CreatePaymentAsync(PaymentAttempt attempt, PaymentRecord payment, string clientIp, CancellationToken ct);
     bool TryVerifyWebhook(IReadOnlyDictionary<string, string> payload, out VerifiedPaymentWebhook webhook);
     Task<ProviderPaymentStatus?> QueryStatusAsync(PaymentAttempt attempt, CancellationToken ct);

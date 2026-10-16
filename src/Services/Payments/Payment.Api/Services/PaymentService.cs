@@ -28,11 +28,25 @@ public sealed class PaymentService(
         }
         catch (KeyNotFoundException)
         {
+            logger.LogWarning("Ordering has no payment details for order {OrderId}.", orderId);
             throw new AppException(StatusCodes.Status404NotFound, "Order not found.");
         }
 
+        logger.LogInformation(
+            "Ordering returned order {OrderId} status {Status} owner {OrderUserId} for caller {CallerUserId}.",
+            order.OrderId, order.Status, order.UserId, userId);
+
         if (order.UserId != userId)
-            throw new AppException(StatusCodes.Status404NotFound, "Order not found.");
+        {
+            logger.LogWarning(
+                "Payment caller {CallerUserId} is not the owner {OrderUserId} of order {OrderId}.",
+                userId, order.UserId, orderId);
+            throw new AppException(
+                StatusCodes.Status404NotFound,
+                environment.IsDevelopment()
+                    ? "Order not found for this user. Sign in as the customer who placed the order."
+                    : "Order not found.");
+        }
         if (!string.Equals(order.Status, "Confirmed", StringComparison.Ordinal))
             throw new AppException(StatusCodes.Status409Conflict, "Only a confirmed order can be paid.");
         if (order.Amount <= 0 || order.PaymentExpiresAt <= DateTime.UtcNow)
@@ -41,6 +55,14 @@ public sealed class PaymentService(
         var provider = ResolveProvider(method);
         if (provider.Name == "Fake" && !environment.IsDevelopment())
             throw new AppException(StatusCodes.Status400BadRequest, "Fake payment is available only in development.");
+        try
+        {
+            provider.EnsureReady();
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new AppException(StatusCodes.Status503ServiceUnavailable, exception.Message);
+        }
 
         var payment = await db.Payments.Include(x => x.Attempts)
             .SingleOrDefaultAsync(x => x.OrderId == orderId, ct);

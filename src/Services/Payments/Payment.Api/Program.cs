@@ -38,9 +38,9 @@ builder.Services.AddJwtAuth(builder.Configuration);
 builder.Services.AddMessaging(builder.Configuration, x =>
 {
     x.AddConsumer<RefundRequestedConsumer>();
-    x.AddConsumer<FaultAuditConsumer<RefundRequested>>();
-    x.AddConsumer<FaultAuditConsumer<PaymentSucceeded>>();
-    x.AddConsumer<FaultAuditConsumer<PaymentFailed>>();
+    x.AddFaultAudit<RefundRequested>("payment");
+    x.AddFaultAudit<PaymentSucceeded>("payment");
+    x.AddFaultAudit<PaymentFailed>("payment");
     x.AddEntityFrameworkOutbox<PaymentDbContext>(o =>
     {
         o.UseSqlServer();

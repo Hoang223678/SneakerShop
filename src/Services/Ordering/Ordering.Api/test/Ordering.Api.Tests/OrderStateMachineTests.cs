@@ -58,6 +58,27 @@ public class OrderStateMachineTests
     }
 
     [Fact]
+    public async Task Stock_reserved_arriving_before_order_created_still_confirms()
+    {
+        var orderId = Guid.NewGuid();
+        await using var provider = CreateProvider();
+        await SeedOrderAsync(provider, orderId);
+        var harness = provider.GetRequiredService<ITestHarness>();
+        await harness.Start();
+
+        await harness.Bus.Publish(new StockReserved(orderId));
+        await harness.Bus.Publish(new OrderCreated(
+            orderId, Guid.NewGuid(), Array.Empty<OrderLine>(), DateTime.UtcNow.AddMinutes(15)));
+
+        await WaitForAsync(async () =>
+        {
+            await using var scope = provider.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<OrderDbContext>();
+            return await db.Orders.AnyAsync(x => x.Id == orderId && x.Status == OrderStatus.Confirmed);
+        });
+    }
+
+    [Fact]
     public async Task Payment_failure_keeps_confirmed_order_available_for_retry()
     {
         var orderId = Guid.NewGuid();
@@ -78,7 +99,7 @@ public class OrderStateMachineTests
     }
 
     [Fact]
-    public async Task Payment_success_marks_order_paid_and_records_payment_id()
+    public async Task Payment_success_marks_order_paid_and_ships_it()
     {
         var orderId = Guid.NewGuid();
         var paymentId = Guid.NewGuid();
@@ -91,11 +112,13 @@ public class OrderStateMachineTests
         await harness.Bus.Publish(new PaymentSucceeded(orderId, paymentId, 100m));
         Assert.True(await harness.Consumed.Any<PaymentSucceeded>());
         Assert.True(await harness.Published.Any<OrderPaid>());
+        Assert.True(await harness.Published.Any<OrderShipped>(x => x.Context.Message.OrderId == orderId));
 
         await using var scope = provider.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<OrderDbContext>();
         var order = await db.Orders.SingleAsync(x => x.Id == orderId);
         Assert.True(order.IsPaid);
+        Assert.Equal(OrderStatus.Shipped, order.Status);
         Assert.Equal(paymentId, order.PaymentId);
     }
 
@@ -158,5 +181,17 @@ public class OrderStateMachineTests
             ShippingAddress = "Test address"
         });
         await db.SaveChangesAsync();
+    }
+
+    private static async Task WaitForAsync(Func<Task<bool>> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (await condition()) return;
+            await Task.Delay(50);
+        }
+
+        throw new TimeoutException("The order did not reach the expected state.");
     }
 }
