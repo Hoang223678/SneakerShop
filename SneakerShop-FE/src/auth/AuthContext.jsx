@@ -1,4 +1,5 @@
 import { createContext, useContext, useMemo, useState } from "react";
+import { isAdminUser } from "./roles.js";
 
 const STORAGE_KEY = "sneakershop.auth";
 const AuthContext = createContext(null);
@@ -19,6 +20,7 @@ export function AuthProvider({ children }) {
     session,
     user: session?.user ?? null,
     token: session?.accessToken ?? null,
+    isAdmin: isAdminUser(session?.user),
     setSession: next => {
       setSession(next);
       if (next) localStorage.setItem(STORAGE_KEY, JSON.stringify(next));

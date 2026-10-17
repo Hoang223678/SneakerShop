@@ -13,7 +13,7 @@ const links = [
 export default function Navbar() {
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
-  const { user, logout } = useAuth();
+  const { user, isAdmin } = useAuth();
   return (
     <nav className="colorlib-nav" role="navigation">
       <div className="top-menu">
@@ -61,15 +61,23 @@ export default function Navbar() {
                 <li className="cart">
                   <NavLink to="/cart"><i className="icon-shopping-cart" /> Cart [0]</NavLink>
                 </li>
-                <li>
-                  {user ? (
-                    <a href="#logout" onClick={event => { event.preventDefault(); logout(); }}>
-                      {user.fullName || user.email}
-                    </a>
-                  ) : (
+                {isAdmin ? (
+                  <li className="cart">
+                    <NavLink to="/admin">Admin</NavLink>
+                  </li>
+                ) : null}
+                {user ? (
+                  <li className="cart nav-user">
+                    <span className="nav-user-name">{user.fullName || user.email}</span>
+                    <NavLink to="/profile" className="nav-user-icon" aria-label="Open profile">
+                      <img src="/images/profile-icon.png" alt="" />
+                    </NavLink>
+                  </li>
+                ) : (
+                  <li className="cart">
                     <NavLink to="/login">Log in</NavLink>
-                  )}
-                </li>
+                  </li>
+                )}
               </ul>
             </div>
           </div>

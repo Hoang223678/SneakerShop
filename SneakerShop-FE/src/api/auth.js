@@ -30,3 +30,19 @@ export async function login({ email, password }) {
 export async function register({ email, password, fullName }) {
   return identityPost("/api/auth/register", { email, password, fullName });
 }
+
+export async function fetchMe(token) {
+  let lastError;
+  for (const base of IDENTITY_APIS) {
+    try {
+      const { data } = await axios.get(`${base}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return data;
+    } catch (error) {
+      if (error.response) throw new Error(errorMessage(error));
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error("Could not reach Identity.");
+}
