@@ -1,0 +1,195 @@
+### Sneaker Shop - sample requests (VS Code "REST Client" extension or JetBrains Rider / Visual Studio .http files)
+### Everything goes through the API gateway.
+
+@host = http://localhost:5000
+@variantAirMax9 = 00000002-0000-0000-0000-000000000002
+@variantSamba10 = 00000002-0000-0000-0000-000000000011
+
+### 1. Log in as the demo customer
+# @name customerLogin
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "customer@sneakershop.local", "password": "Customer@12345" }
+
+###
+@customerToken = {{customerLogin.response.body.$.accessToken}}
+
+### 2. Log in as admin
+# @name adminLogin
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "admin@sneakershop.local", "password": "Admin@12345" }
+
+###
+@adminToken = {{adminLogin.response.body.$.accessToken}}
+
+### 3. Browse the catalog (public)
+GET {{host}}/api/brands
+
+###
+GET {{host}}/api/sneakers?search=nike&sort=price_desc&page=1&pageSize=6
+
+###
+GET {{host}}/api/sneakers/00000001-0000-0000-0000-000000000001
+
+### 4. Check stock for two variants (public)
+POST {{host}}/api/inventory/availability
+Content-Type: application/json
+
+{ "variantIds": [ "{{variantAirMax9}}", "{{variantSamba10}}" ] }
+
+### 5. Add one or many variants to the same cart, then pay the cart
+POST {{host}}/api/cart/items
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "items": [
+    { "variantId": "{{variantAirMax9}}", "quantity": 2 },
+    { "variantId": "{{variantSamba10}}", "quantity": 1 }
+  ]
+}
+
+###
+GET {{host}}/api/cart
+Authorization: Bearer {{customerToken}}
+
+###
+# @name checkoutCart
+POST {{host}}/api/cart/checkout
+Idempotency-Key: {{$guid}}
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "shippingName": "Demo Customer",
+  "shippingPhone": "0900000000",
+  "shippingAddress": "1 Example Street, Binh Thanh District, Ho Chi Minh City",
+  "method": "vnpay"
+}
+
+###
+# Open payment.paymentUrl in a browser to finish VNPay sandbox checkout.
+
+### 5b. Place an order directly (without the cart) -> starts Pending, becomes Confirmed after the stock check
+# @name createOrder
+POST {{host}}/api/orders
+Idempotency-Key: {{$guid}}
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "shippingName": "Demo Customer",
+  "shippingPhone": "0900000000",
+  "shippingAddress": "1 Example Street, Binh Thanh District, Ho Chi Minh City",
+  "items": [
+    { "variantId": "{{variantAirMax9}}", "quantity": 2 },
+    { "variantId": "{{variantSamba10}}", "quantity": 1 }
+  ]
+}
+
+###
+@orderId = {{createOrder.response.body.$.id}}
+
+### 6. Look at the order again (status should now be Confirmed) and at stock (Reserved goes up)
+GET {{host}}/api/orders/{{orderId}}
+Authorization: Bearer {{customerToken}}
+
+###
+GET {{host}}/api/orders/my
+Authorization: Bearer {{customerToken}}
+
+###
+GET {{host}}/api/inventory?page=1&pageSize=5
+Authorization: Bearer {{adminToken}}
+
+### 7. Start payment (use "vnpay" for the VNPay sandbox URL)
+# @name createPayment
+POST {{host}}/api/payments
+Authorization: Bearer {{customerToken}}
+Content-Type: application/json
+
+{
+  "orderId": "{{orderId}}",
+  "method": "vnpay"
+}
+
+###
+@paymentId = {{createPayment.response.body.$.id}}
+@attemptId = {{createPayment.response.body.$.attemptId}}
+
+### Complete the Fake attempt (development only)
+POST {{host}}/api/payments/dev/attempts/{{attemptId}}/succeed
+Authorization: Bearer {{customerToken}}
+
+###
+GET {{host}}/api/payments/{{paymentId}}
+Authorization: Bearer {{customerToken}}
+
+### Admin: request a partial refund; the key makes retries idempotent
+POST {{host}}/api/payments/{{paymentId}}/refund
+Idempotency-Key: {{$guid}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "amount": 1.00 }
+
+### VNPay IPN example only; replace with a valid provider-signed payload
+GET {{host}}/api/payments/webhooks/vnpay?vnp_TxnRef=ATTEMPT_ID&vnp_Amount=100000&vnp_ResponseCode=00&vnp_TransactionStatus=00&vnp_TransactionNo=TRANSACTION_ID&vnp_TmnCode=TMNCODE&vnp_CurrCode=VND&vnp_SecureHash=SIGNATURE
+
+### 8a. Cancel it (releases reserved stock; a paid order is refunded) ...
+POST {{host}}/api/orders/{{orderId}}/cancel
+Authorization: Bearer {{customerToken}}
+
+### 8b. ... or, as admin, ship it (deducts the stock for good) - use a paid order
+PUT {{host}}/api/orders/{{orderId}}/status
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "status": "Shipped" }
+
+### 9. Admin: add a new sneaker, then a variant (Inventory creates an empty stock record through an event)
+# @name newSneaker
+POST {{host}}/api/sneakers
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "name": "Test Runner 1", "description": "Demo product", "brandId": 1, "gender": "Unisex", "price": 99.90, "imageUrl": null }
+
+###
+@newSneakerId = {{newSneaker.response.body.$.id}}
+
+###
+# @name newVariant
+POST {{host}}/api/sneakers/{{newSneakerId}}/variants
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "sku": "TR1-BLACK-9.0", "size": 9, "color": "Black" }
+
+###
+@newVariantId = {{newVariant.response.body.$.id}}
+
+### 9b. Admin: add one color to every active sneaker and get each sneaker's variant ids
+# Sizes follow the sneaker. A sneaker with no variants gets sizes 8, 9, 10 and 11.
+# Inventory creates an empty stock row for each new variant id.
+POST {{host}}/api/sneakers/variants
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "color": "Black" }
+
+### 10. Admin: put 15 pairs of the new variant in stock
+PUT {{host}}/api/inventory/{{newVariantId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "quantity": 15 }
+
+### 11. Register a brand-new customer
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{ "email": "new.user@example.com", "password": "Passw0rd!23", "fullName": "New User", "phone": "0911111111" }

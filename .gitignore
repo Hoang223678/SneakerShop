@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+**/node_modules/
+**/dist/
+**/*.user
+**/*.suo
+**/.sass-cache/
+SneakerShop-BE-git.bak/
