@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext.jsx";
 
 const links = [
   { to: "/", label: "Home", end: true },
@@ -12,6 +13,7 @@ const links = [
 export default function Navbar() {
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
+  const { user, logout } = useAuth();
   return (
     <nav className="colorlib-nav" role="navigation">
       <div className="top-menu">
@@ -58,6 +60,15 @@ export default function Navbar() {
                 </li>
                 <li className="cart">
                   <NavLink to="/cart"><i className="icon-shopping-cart" /> Cart [0]</NavLink>
+                </li>
+                <li>
+                  {user ? (
+                    <a href="#logout" onClick={event => { event.preventDefault(); logout(); }}>
+                      {user.fullName || user.email}
+                    </a>
+                  ) : (
+                    <NavLink to="/login">Log in</NavLink>
+                  )}
                 </li>
               </ul>
             </div>
