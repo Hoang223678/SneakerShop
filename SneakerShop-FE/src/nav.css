@@ -1,0 +1,28 @@
+.nav-toggle {
+  display: none;
+  margin: 12px 0 0;
+  padding: 8px 14px;
+  border: 1px solid #111;
+  background: #fff;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+@media (max-width: 767.98px) {
+  .nav-toggle {
+    display: inline-block;
+  }
+
+  .colorlib-nav .menu-1.is-open {
+    display: block;
+  }
+
+  .colorlib-nav .menu-1.is-open ul li {
+    display: block;
+    margin: 8px 0;
+  }
+
+  .colorlib-nav .menu-1.is-open ul li.cart {
+    float: none;
+  }
+}
