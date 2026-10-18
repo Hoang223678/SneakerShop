@@ -1,33 +1,46 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchVariants } from "../api/catalog.js";
+import { fetchSneakers, fetchVariants } from "../api/catalog.js";
 
 export default function AdminInventory() {
+  const [sneakers, setSneakers] = useState([]);
   const [variants, setVariants] = useState([]);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetchVariants()
-      .then(setVariants)
+    Promise.all([
+      fetchSneakers({ page: 1, pageSize: 100, sort: "name" }),
+      fetchVariants()
+    ])
+      .then(([sneakerPage, variantList]) => {
+        setSneakers(sneakerPage.items || []);
+        setVariants(variantList || []);
+      })
       .catch(err => setError(err.message));
   }, []);
 
   const groups = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const map = new Map();
+    const bySneaker = new Map();
     for (const variant of variants) {
-      const sneakerName = variant.sneakerName || "Unknown sneaker";
-      if (term && !sneakerName.toLowerCase().includes(term) && !String(variant.size).includes(term) && !(variant.color || "").toLowerCase().includes(term)) {
-        continue;
-      }
-      if (!map.has(variant.sneakerId)) {
-        map.set(variant.sneakerId, { sneakerId: variant.sneakerId, name: sneakerName, variants: [] });
-      }
-      map.get(variant.sneakerId).variants.push(variant);
+      if (!bySneaker.has(variant.sneakerId)) bySneaker.set(variant.sneakerId, []);
+      bySneaker.get(variant.sneakerId).push(variant);
     }
-    return [...map.values()];
-  }, [variants, search]);
+
+    return sneakers
+      .map(sneaker => ({
+        sneakerId: sneaker.id,
+        name: sneaker.name,
+        variants: bySneaker.get(sneaker.id) || []
+      }))
+      .filter(group => {
+        if (!term) return true;
+        if (group.name.toLowerCase().includes(term)) return true;
+        return group.variants.some(variant =>
+          String(variant.size).includes(term) || (variant.color || "").toLowerCase().includes(term) || (variant.sku || "").toLowerCase().includes(term));
+      });
+  }, [sneakers, variants, search]);
 
   return (
     <div className="ad-body ad-body-single">
@@ -35,7 +48,7 @@ export default function AdminInventory() {
         <div className="ad-hello">
           <h1>Inventory</h1>
         </div>
-        <p className="ad-help">Click a sneaker name to see its details and every size/color variant.</p>
+        <p className="ad-help">Click a sneaker name to add, edit, or delete its size/color variants.</p>
         <form className="ad-toolbar" onSubmit={event => event.preventDefault()}>
           <input
             type="search"

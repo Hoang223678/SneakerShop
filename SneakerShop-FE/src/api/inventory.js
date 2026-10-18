@@ -43,3 +43,29 @@ export async function setStock(token, variantId, quantity) {
     token
   });
 }
+
+export async function createVariant(token, sneakerId, body) {
+  return inventoryRequest({
+    method: "post",
+    path: `/api/inventory/${sneakerId}`,
+    data: body,
+    token
+  });
+}
+
+export async function updateVariant(token, variantId, body) {
+  return inventoryRequest({
+    method: "put",
+    path: `/api/inventory/variants/${variantId}`,
+    data: body,
+    token
+  });
+}
+
+export async function deleteVariant(token, variantId) {
+  return inventoryRequest({
+    method: "delete",
+    path: `/api/inventory/variants/${variantId}`,
+    token
+  });
+}

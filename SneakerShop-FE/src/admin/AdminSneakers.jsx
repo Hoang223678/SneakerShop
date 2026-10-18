@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   createSneaker,
   deleteSneaker,
@@ -15,6 +16,7 @@ const emptyForm = { name: "", description: "", brandId: "", gender: "Unisex", pr
 
 export default function AdminSneakers() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -83,10 +85,16 @@ export default function AdminSneakers() {
       imageUrl: form.imageUrl.trim() || null
     };
     try {
-      if (editingId) await updateSneaker(token, editingId, body);
-      else await createSneaker(token, body);
-      setOpen(false);
-      await load(editingId ? page : 1, search);
+      if (editingId) {
+        await updateSneaker(token, editingId, body);
+        setOpen(false);
+        await load(page, search);
+      } else {
+        const created = await createSneaker(token, body);
+        setOpen(false);
+        navigate(`/admin/inventory/${created.id}`);
+        return;
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -157,6 +165,7 @@ export default function AdminSneakers() {
                   <td>{item.gender}</td>
                   <td>{formatPrice(item.price)}</td>
                   <td className="ad-actions">
+                    <Link to={`/admin/inventory/${item.id}`}>Stock</Link>
                     <button type="button" onClick={() => openEdit(item.id)}>Edit</button>
                     <button type="button" className="is-danger" onClick={() => onDelete(item.id, item.name)}>Delete</button>
                   </td>
