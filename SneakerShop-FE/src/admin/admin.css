@@ -221,6 +221,45 @@
 .ad-pager button:disabled { opacity: .4; }
 
 .ad-error { color: #b42318; font-weight: 700; }
+.ad-help, .ad-muted { color: #6b7280; font-size: .9rem; margin: 0 0 14px; }
+.ad-qty {
+  width: 88px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.ad-name-list { display: grid; gap: 12px; }
+.ad-name-card { margin: 0; }
+.ad-name-card h2 { margin: 0 0 6px; }
+.ad-name-card h2 a { color: #2563eb; }
+.ad-name-card h2 a:hover { text-decoration: underline; }
+.ad-name-card .ad-muted { margin: 0; }
+
+.ad-inv-detail {
+  display: flex;
+  gap: 22px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+.ad-inv-detail img {
+  width: 140px;
+  height: 140px;
+  flex-shrink: 0;
+  object-fit: contain;
+  background: #f8fafc;
+  border-radius: 14px;
+}
+.ad-inv-detail h1 { margin: 0 0 12px; font-size: 1.45rem; }
+.ad-inv-meta { display: grid; gap: 8px; margin: 0 0 12px; }
+.ad-inv-meta > div { display: grid; grid-template-columns: 90px 1fr; gap: 8px; }
+.ad-inv-meta dt { margin: 0; color: #6b7280; font-weight: 700; }
+.ad-inv-meta dd { margin: 0; }
+.ad-table td:nth-child(3) { word-break: break-word; max-width: 220px; }
+
+@media (max-width: 700px) {
+  .ad-inv-detail { flex-direction: column; }
+}
 
 .ad-modal {
   position: fixed;

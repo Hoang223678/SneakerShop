@@ -45,6 +45,11 @@ export async function fetchBrands() {
   return catalogRequest({ method: "get", path: "/api/brands" });
 }
 
+export async function fetchVariants(sneakerId) {
+  const path = sneakerId ? `/api/variants?sneakerId=${sneakerId}` : "/api/variants";
+  return catalogRequest({ method: "get", path });
+}
+
 export async function createBrand(token, body) {
   return catalogRequest({ method: "post", path: "/api/brands", data: body, token });
 }

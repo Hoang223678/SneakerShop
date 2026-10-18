@@ -106,3 +106,27 @@
 .profile-fields dd {
   margin: 0;
 }
+
+.product-detail-wrap .product-detail-image {
+  width: 100%;
+  border: 1px solid #eee;
+  padding: 16px;
+  margin-bottom: 24px;
+  background: #fff;
+}
+
+.product-detail-wrap .product-detail-image img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: min(70vh, 560px);
+  object-fit: contain;
+  margin: 0 auto;
+}
+
+@media (max-width: 767.98px) {
+  .product-detail-wrap .product-desc {
+    padding-left: 0;
+  }
+}

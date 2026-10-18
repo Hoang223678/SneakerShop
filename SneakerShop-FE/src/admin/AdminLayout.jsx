@@ -24,6 +24,13 @@ const nav = [
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 2 7l10 5 10-5-10-5zm0 9L4.5 7.4 2 8.7 12 14l10-5.3-2.5-1.3L12 11zM2 12.3 12 18l10-5.7V16L12 22 2 16v-3.7z" /></svg>
     )
+  },
+  {
+    to: "/admin/inventory",
+    label: "Inventory",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v4H3V4zm0 6h18v10H3V10zm4 2v6h2v-6H7zm4 0v6h6v-6h-6z" /></svg>
+    )
   }
 ];
 

@@ -16,6 +16,8 @@ import AdminLayout from "./admin/AdminLayout.jsx";
 import AdminDashboard from "./admin/AdminDashboard.jsx";
 import AdminSneakers from "./admin/AdminSneakers.jsx";
 import AdminBrands from "./admin/AdminBrands.jsx";
+import AdminInventory from "./admin/AdminInventory.jsx";
+import AdminInventorySneaker from "./admin/AdminInventorySneaker.jsx";
 
 export default function App() {
   return (
@@ -26,6 +28,8 @@ export default function App() {
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/admin/sneakers" element={<AdminSneakers />} />
           <Route path="/admin/brands" element={<AdminBrands />} />
+          <Route path="/admin/inventory" element={<AdminInventory />} />
+          <Route path="/admin/inventory/:sneakerId" element={<AdminInventorySneaker />} />
         </Route>
       </Route>
       <Route element={<Layout />}>

@@ -34,12 +34,12 @@ export default function ProductDetail() {
           {!sneaker && !error && <p className="text-center">Loading...</p>}
           {sneaker && (
             <div className="row row-pb-lg product-detail-wrap">
-              <div className="col-sm-8">
-                <div className="product-entry border">
-                  <img src={sneaker.imageUrl || "/images/item-1.jpg"} className="img-fluid" alt={sneaker.name} />
+              <div className="col-12 col-md-7">
+                <div className="product-detail-image">
+                  <img src={sneaker.imageUrl || "/images/item-1.jpg"} alt={sneaker.name} />
                 </div>
               </div>
-              <div className="col-sm-4">
+              <div className="col-12 col-md-5">
                 <div className="product-desc">
                   <h3>{sneaker.name}</h3>
                   <p className="price"><span>{formatPrice(sneaker.price)}</span></p>
