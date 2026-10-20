@@ -169,6 +169,29 @@ public sealed class OrderServiceTests
     }
 
     [Fact]
+    public async Task Dashboard_sums_paid_pairs_and_revenue_for_month_and_year()
+    {
+        await using var fixture = await TestFixture.CreateAsync();
+        var now = DateTime.UtcNow;
+        fixture.Db.Orders.AddRange(
+            PaidSeed(now, 200m, 2),
+            PaidSeed(now, 50m, 1),
+            PaidSeed(now.AddMonths(-1), 80m, 4),
+            PaidSeed(now.AddYears(-1), 500m, 10),
+            SeedOrder(Guid.NewGuid(), OrderStatus.Pending));
+        await fixture.Db.SaveChangesAsync();
+
+        var dashboard = await fixture.Service.GetDashboardAsync(null, default);
+
+        Assert.Equal(250m, dashboard.MonthRevenue);
+        Assert.Equal(3, dashboard.MonthPairsSold);
+        Assert.Equal(2, dashboard.PaidOrderCountMonth);
+        Assert.Equal(80m, dashboard.PreviousMonthRevenue);
+        Assert.Equal(4, dashboard.PreviousMonthPairsSold);
+        Assert.Contains(dashboard.Monthly, point => point.Revenue == 250m && point.PairsSold == 3);
+    }
+
+    [Fact]
     public async Task Get_hides_another_customers_order()
     {
         var order = SeedOrder(Guid.NewGuid());
@@ -262,6 +285,24 @@ public sealed class OrderServiceTests
         ShippingPhone = "0900000000",
         ShippingAddress = "Test address"
     };
+
+    private static Order PaidSeed(DateTime createdAt, decimal total, int quantity)
+    {
+        var order = SeedOrder(Guid.NewGuid(), OrderStatus.Shipped);
+        order.IsPaid = true;
+        order.CreatedAt = createdAt;
+        order.TotalAmount = total;
+        order.Items.Add(new OrderItem
+        {
+            SneakerName = "Runner",
+            Sku = "RUN-9",
+            Size = 9,
+            Color = "Black",
+            UnitPrice = total,
+            Quantity = quantity
+        });
+        return order;
+    }
 
     private sealed class TestFixture : IAsyncDisposable
     {

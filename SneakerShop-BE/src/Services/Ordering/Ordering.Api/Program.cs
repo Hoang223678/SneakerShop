@@ -82,6 +82,11 @@ builder.Services.AddMessaging(builder.Configuration, x =>
 builder.Services.AddApiDefaults();
 builder.Services.AddSwaggerWithJwt("Sneaker Shop - Ordering API");
 builder.Services.AddControllers().AddApiJson();
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+}
 
 var app = builder.Build();
 
@@ -89,6 +94,7 @@ app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
 {
+    app.UseCors();
     app.UseSwagger();
     app.UseSwaggerUI();
 }

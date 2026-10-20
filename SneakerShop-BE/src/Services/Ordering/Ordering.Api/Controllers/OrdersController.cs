@@ -54,6 +54,12 @@ public class OrdersController(IOrderService orders) : ControllerBase, IOrdersCon
     public async Task<ActionResult<List<OrderDto>>> My(CancellationToken ct) =>
         await orders.ListMineAsync(User.GetUserId(), ct);
 
+    /// <summary>Admin: monthly revenue and pairs sold for the dashboard.</summary>
+    [Authorize(Roles = Roles.Admin)]
+    [HttpGet("dashboard")]
+    public async Task<ActionResult<DashboardDto>> Dashboard([FromQuery] int? year, CancellationToken ct) =>
+        await orders.GetDashboardAsync(year, ct);
+
     /// <summary>Admin: all orders, optionally filtered by status.</summary>
     [Authorize(Roles = Roles.Admin)]
     [HttpGet]

@@ -56,3 +56,19 @@ public record OrderDto(
     string ShippingName, string ShippingPhone, string ShippingAddress,
     string? FailureReason, DateTime CreatedAt, DateTime UpdatedAt,
     IReadOnlyList<OrderItemDto> Items);
+
+public record DashboardMonthPoint(int Month, decimal Revenue, int PairsSold);
+
+public record DashboardDto(
+    int Year,
+    int Month,
+    decimal MonthRevenue,
+    decimal PreviousMonthRevenue,
+    decimal YearRevenue,
+    decimal PreviousYearRevenue,
+    int MonthPairsSold,
+    int PreviousMonthPairsSold,
+    int YearPairsSold,
+    int PreviousYearPairsSold,
+    int PaidOrderCountMonth,
+    IReadOnlyList<DashboardMonthPoint> Monthly);
