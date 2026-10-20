@@ -1,4 +1,5 @@
 using Catalog.Api.Data;
+using Catalog.Api.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SneakerShop.BuildingBlocks;
@@ -13,7 +14,7 @@ namespace Catalog.Api.Controllers;
 [ApiController]
 [Route("internal/variants")]
 [InternalApiKey]
-public class InternalVariantsController(CatalogDbContext db) : ControllerBase
+public class InternalVariantsController(CatalogDbContext db) : ControllerBase, IInternalVariantsController
 {
     [HttpPost("lookup")]
     public async Task<ActionResult<List<VariantLookupItem>>> Lookup(VariantLookupRequest request, CancellationToken ct)

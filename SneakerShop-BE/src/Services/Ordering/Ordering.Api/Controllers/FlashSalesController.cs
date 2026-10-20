@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Ordering.Api.Dtos;
+using Ordering.Api.Interfaces;
 using Ordering.Api.Services;
 using SneakerShop.BuildingBlocks;
 
@@ -8,7 +9,7 @@ namespace Ordering.Api.Controllers;
 
 [ApiController]
 [Route("api/flash-sales")]
-public class FlashSalesController(IFlashSaleAdmin flashSales) : ControllerBase
+public class FlashSalesController(IFlashSaleAdmin flashSales) : ControllerBase, IFlashSalesController
 {
     /// <summary>Public: pairs left in a running flash sale and when it ends.</summary>
     [HttpGet("{variantId:guid}")]

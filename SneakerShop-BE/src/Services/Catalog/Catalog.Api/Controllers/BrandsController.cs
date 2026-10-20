@@ -3,6 +3,7 @@ using Catalog.Api.Data;
 using Catalog.Api.Domain;
 using Catalog.Api.Dtos;
 using Catalog.Api.Helpers;
+using Catalog.Api.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,7 @@ namespace Catalog.Api.Controllers;
 
 [ApiController]
 [Route("api/brands")]
-public class BrandsController(CatalogDbContext db, IFusionCache cache) : ControllerBase
+public class BrandsController(CatalogDbContext db, IFusionCache cache) : ControllerBase, IBrandsController
 {
     [HttpGet]
     public async Task<ActionResult<List<BrandDto>>> List(CancellationToken ct) =>

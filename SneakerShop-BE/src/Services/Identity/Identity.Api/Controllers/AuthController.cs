@@ -1,6 +1,7 @@
 using Identity.Api.Data;
 using Identity.Api.Domain;
 using Identity.Api.Dtos;
+using Identity.Api.Interfaces;
 using Identity.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -15,7 +16,7 @@ namespace Identity.Api.Controllers;
 public class AuthController(
     AuthDbContext db,
     ITokenService tokens,
-    ITokenRevocationStore revocations) : ControllerBase
+    ITokenRevocationStore revocations) : ControllerBase, IAuthController
 {
     /// <summary>Register a new customer account.</summary>
     [HttpPost("register")]

@@ -4,6 +4,7 @@ using Catalog.Api.Data;
 using Catalog.Api.Domain;
 using Catalog.Api.Dtos;
 using Catalog.Api.Helpers;
+using Catalog.Api.Interfaces;
 using Catalog.Api.Services;
 using MassTransit;
 using Microsoft.AspNetCore.Authorization;
@@ -18,7 +19,7 @@ namespace Catalog.Api.Controllers;
 [ApiController]
 [Route("api/sneakers")]
 public class SneakersController(
-    CatalogDbContext db, IPublishEndpoint publisher, IFusionCache cache, IBestSellerRanking ranking) : ControllerBase
+    CatalogDbContext db, IPublishEndpoint publisher, IFusionCache cache, IBestSellerRanking ranking) : ControllerBase, ISneakersController
 {
     /// <summary>Search and filter the catalog (active products only).</summary>
     [HttpGet]

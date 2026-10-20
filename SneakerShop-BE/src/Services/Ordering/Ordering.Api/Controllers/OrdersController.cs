@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Ordering.Api.Domain;
 using Ordering.Api.Dtos;
+using Ordering.Api.Interfaces;
 using Ordering.Api.Services;
 using SneakerShop.BuildingBlocks;
 
@@ -10,7 +11,7 @@ namespace Ordering.Api.Controllers;
 [ApiController]
 [Route("api/orders")]
 [Authorize]
-public class OrdersController(IOrderService orders) : ControllerBase
+public class OrdersController(IOrderService orders) : ControllerBase, IOrdersController
 {
     /// <summary>Place an order. It starts as Pending and becomes Confirmed or Rejected once stock is checked.</summary>
     [HttpPost]

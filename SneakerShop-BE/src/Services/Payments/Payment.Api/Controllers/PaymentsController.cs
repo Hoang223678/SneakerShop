@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 using Payment.Api.Dtos;
+using Payment.Api.Interfaces;
 using Payment.Api.Providers;
 using Payment.Api.Services;
 using SneakerShop.BuildingBlocks;
@@ -13,7 +14,7 @@ namespace Payment.Api.Controllers;
 [ApiController]
 [Route("api/payments")]
 [Authorize]
-public sealed class PaymentsController(IPaymentService payments, IOptions<VnPayOptions> vnPay) : ControllerBase
+public sealed class PaymentsController(IPaymentService payments, IOptions<VnPayOptions> vnPay) : ControllerBase, IPaymentsController
 {
     /// <summary>Create a payment for a confirmed order. Method <c>vnpay</c> returns a VNPay sandbox checkout URL.</summary>
     [HttpPost]

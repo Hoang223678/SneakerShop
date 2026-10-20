@@ -1,4 +1,5 @@
 using Cart.Api.Dtos;
+using Cart.Api.Interfaces;
 using Cart.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -9,7 +10,7 @@ namespace Cart.Api.Controllers;
 [ApiController]
 [Route("api/cart")]
 [Authorize]
-public class CartController(ICartStore carts, ICatalogClient catalog, ICartCheckoutService checkout) : ControllerBase
+public class CartController(ICartStore carts, ICatalogClient catalog, ICartCheckoutService checkout) : ControllerBase, ICartController
 {
     /// <summary>The signed-in customer's cart with current names and prices from Catalog.</summary>
     [HttpGet]

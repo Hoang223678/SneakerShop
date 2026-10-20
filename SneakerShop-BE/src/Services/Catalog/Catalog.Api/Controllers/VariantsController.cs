@@ -2,6 +2,7 @@ using Catalog.Api.Caching;
 using Catalog.Api.Data;
 using Catalog.Api.Domain;
 using Catalog.Api.Dtos;
+using Catalog.Api.Interfaces;
 using MassTransit;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,7 +15,7 @@ namespace Catalog.Api.Controllers;
 
 [ApiController]
 [Route("api/variants")]
-public class VariantsController(CatalogDbContext db, IPublishEndpoint publisher, IFusionCache cache) : ControllerBase
+public class VariantsController(CatalogDbContext db, IPublishEndpoint publisher, IFusionCache cache) : ControllerBase, IVariantsController
 {
     /// <summary>Catalog variants with their sneaker: one sneakerId maps to many variantIds (sizes/colors).</summary>
     [HttpGet]

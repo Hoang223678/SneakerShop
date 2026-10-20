@@ -1,4 +1,5 @@
 using Cart.Api.Dtos;
+using Cart.Api.Interfaces;
 using Cart.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using SneakerShop.BuildingBlocks;
@@ -8,7 +9,7 @@ namespace Cart.Api.Controllers;
 [ApiController]
 [Route("internal/cart")]
 [InternalApiKey]
-public sealed class InternalCartController(ICartStore carts, ICatalogClient catalog) : ControllerBase
+public sealed class InternalCartController(ICartStore carts, ICatalogClient catalog) : ControllerBase, IInternalCartController
 {
     [HttpGet("{userId:guid}")]
     public async Task<ActionResult<InternalCartDto>> Get(Guid userId, CancellationToken ct)
