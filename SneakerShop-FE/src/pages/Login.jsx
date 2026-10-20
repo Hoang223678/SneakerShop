@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { login, register } from "../api/auth.js";
 import { useAuth } from "../auth/AuthContext.jsx";
 import { homePathFor } from "../auth/roles.js";
@@ -8,6 +8,13 @@ import "./login.css";
 export default function Login() {
   const { setSession, user } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const from = params.get("from");
+
+  function afterLoginPath(nextUser) {
+    if (from && from.startsWith("/") && !from.startsWith("//")) return from;
+    return homePathFor(nextUser);
+  }
   const [tab, setTab] = useState("login");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -38,7 +45,7 @@ export default function Login() {
         password: String(form.get("password") ?? "")
       });
       setSession(session);
-      navigate(homePathFor(session.user), { replace: true });
+      navigate(afterLoginPath(session.user), { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -58,7 +65,7 @@ export default function Login() {
         password: String(form.get("new-password") ?? "")
       });
       setSession(session);
-      navigate(homePathFor(session.user), { replace: true });
+      navigate(afterLoginPath(session.user), { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -66,7 +73,7 @@ export default function Login() {
     }
   }
 
-  if (user) return <Navigate to={homePathFor(user)} replace />;
+  if (user) return <Navigate to={afterLoginPath(user)} replace />;
 
   return (
     <div className="tb">

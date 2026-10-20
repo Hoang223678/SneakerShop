@@ -29,6 +29,15 @@ async function inventoryRequest({ method, path, data, token }) {
   throw lastError ?? new Error("Could not reach Inventory.");
 }
 
+export async function fetchAvailability(variantIds) {
+  if (!variantIds?.length) return [];
+  return inventoryRequest({
+    method: "post",
+    path: "/api/inventory/availability",
+    data: { variantIds }
+  });
+}
+
 export async function fetchInventory({ sneakerId, page = 1, pageSize = 100 } = {}, token) {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (sneakerId) params.set("sneakerId", sneakerId);

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext.jsx";
+import { useCart } from "../cart/CartContext.jsx";
 
 const links = [
   { to: "/", label: "Home", end: true },
@@ -14,6 +15,7 @@ export default function Navbar() {
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
   const { user, isAdmin } = useAuth();
+  const { count } = useCart();
   return (
     <nav className="colorlib-nav" role="navigation">
       <div className="top-menu">
@@ -59,7 +61,7 @@ export default function Navbar() {
                   </ul>
                 </li>
                 <li className="cart">
-                  <NavLink to="/cart"><i className="icon-shopping-cart" /> Cart [0]</NavLink>
+                  <NavLink to="/cart"><i className="icon-shopping-cart" /> Cart [{count}]</NavLink>
                 </li>
                 {isAdmin ? (
                   <li className="cart">
