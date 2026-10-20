@@ -111,7 +111,18 @@ services:
     environment:
       <<: *service-env
       ConnectionStrings__Default: "Server=sqlserver,1433;Database=SneakerShop_Inventory;User Id=sa;Password=${SA_PASSWORD:-12345};TrustServerCertificate=True;Encrypt=False"
-    depends_on: *depends-infra
+      Services__Catalog__BaseUrl: "http://catalog-api:8080/"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      catalog-api:
+        condition: service_started
     ports:
       - "5003:8080"
 
@@ -139,7 +150,7 @@ services:
       Payments__VnPay__TmnCode: ${VNPAY_TMN_CODE:-VZYCD771}
       Payments__VnPay__HashSecret: ${VNPAY_HASH_SECRET:-CXGWXWMVHKMMUJPSGOPYESTPADJUZMLI}
       Payments__VnPay__ReturnUrl: ${VNPAY_RETURN_URL:-http://localhost:5000/api/payments/vnpay/return}
-      Payments__VnPay__FrontendResultUrl: ${VNPAY_FRONTEND_RESULT_URL:-}
+      Payments__VnPay__FrontendResultUrl: ${VNPAY_FRONTEND_RESULT_URL:-http://localhost:5173/order-complete}
     depends_on:
       sqlserver:
         condition: service_healthy

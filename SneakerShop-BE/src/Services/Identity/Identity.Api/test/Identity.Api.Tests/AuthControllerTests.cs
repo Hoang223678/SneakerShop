@@ -18,7 +18,6 @@ public sealed class AuthControllerTests : IDisposable
 {
     private readonly AuthDbContext _db;
     private readonly AuthController _controller;
-    private readonly FakeLoginAttemptLimiter _loginAttempts = new();
     private readonly FakeRevocationStore _revocations = new();
 
     public AuthControllerTests()
@@ -36,33 +35,7 @@ public sealed class AuthControllerTests : IDisposable
             ExpiresMinutes = 60
         }));
 
-        _controller = new AuthController(_db, tokens, _loginAttempts, _revocations);
-    }
-
-    [Fact]
-    public async Task Login_IsRejectedWhileEmailIsLockedEvenWithCorrectPassword()
-    {
-        await AddCustomer("locked@example.com", "Password123!");
-        _loginAttempts.Lockout = TimeSpan.FromSeconds(90);
-
-        var exception = await Assert.ThrowsAsync<AppException>(() =>
-            _controller.Login(new LoginRequest { Email = "Locked@Example.com", Password = "Password123!" }, CancellationToken.None));
-
-        Assert.Equal(StatusCodes.Status429TooManyRequests, exception.StatusCode);
-        Assert.Contains("2 minute(s)", exception.Message);
-    }
-
-    [Fact]
-    public async Task Login_RecordsFailuresAndResetsThemAfterSuccess()
-    {
-        await AddCustomer("retry@example.com", "Password123!");
-
-        await Assert.ThrowsAsync<AppException>(() =>
-            _controller.Login(new LoginRequest { Email = "retry@example.com", Password = "nope" }, CancellationToken.None));
-        Assert.Equal(new[] { "retry@example.com" }, _loginAttempts.Failures);
-
-        await _controller.Login(new LoginRequest { Email = "retry@example.com", Password = "Password123!" }, CancellationToken.None);
-        Assert.Equal(new[] { "retry@example.com" }, _loginAttempts.Resets);
+        _controller = new AuthController(_db, tokens, _revocations);
     }
 
     [Fact]
@@ -87,39 +60,6 @@ public sealed class AuthControllerTests : IDisposable
         var (jti, revokedUntil) = Assert.Single(_revocations.Revoked);
         Assert.Equal("token-1", jti);
         Assert.Equal(expiresAt.ToUnixTimeSeconds(), new DateTimeOffset(revokedUntil).ToUnixTimeSeconds());
-    }
-
-    private async Task AddCustomer(string email, string password)
-    {
-        _db.Users.Add(new User
-        {
-            Email = email,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
-            FullName = "Customer",
-            Role = Roles.Customer
-        });
-        await _db.SaveChangesAsync();
-    }
-
-    private sealed class FakeLoginAttemptLimiter : ILoginAttemptLimiter
-    {
-        public TimeSpan? Lockout { get; set; }
-        public List<string> Failures { get; } = [];
-        public List<string> Resets { get; } = [];
-
-        public Task<TimeSpan?> GetLockoutAsync(string email) => Task.FromResult(Lockout);
-
-        public Task RecordFailureAsync(string email)
-        {
-            Failures.Add(email);
-            return Task.CompletedTask;
-        }
-
-        public Task ResetAsync(string email)
-        {
-            Resets.Add(email);
-            return Task.CompletedTask;
-        }
     }
 
     private sealed class FakeRevocationStore : ITokenRevocationStore

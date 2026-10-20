@@ -7,7 +7,9 @@ public record BrandDto(int Id, string Name, string Slug);
 
 public record SneakerListItem(Guid Id, string Name, string Slug, string Brand, Gender Gender, decimal Price, string? ImageUrl);
 
-public record VariantDto(Guid Id, string Sku, decimal Size, string Color);
+public record VariantDto(Guid Id, Guid SneakerId, string Sku, decimal Size, string Color);
+
+public record VariantListItem(Guid Id, Guid SneakerId, string SneakerName, string Sku, decimal Size, string Color);
 
 public record SneakerDetail(
     Guid Id,

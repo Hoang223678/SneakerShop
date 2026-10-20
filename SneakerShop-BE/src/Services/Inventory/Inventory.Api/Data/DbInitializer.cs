@@ -23,6 +23,7 @@ public static class DbInitializer
             db.StockItems.Add(new StockItem
             {
                 VariantId = v.Id,
+                SneakerId = v.SneakerId,
                 Sku = v.Sku,
                 Quantity = SeedCatalog.InitialStockPerVariant,
                 Reserved = 0,

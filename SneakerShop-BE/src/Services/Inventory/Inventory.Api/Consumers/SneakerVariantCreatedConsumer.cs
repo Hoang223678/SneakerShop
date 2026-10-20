@@ -19,6 +19,7 @@ public class SneakerVariantCreatedConsumer(InventoryDbContext db) : IConsumer<Sn
         db.StockItems.Add(new StockItem
         {
             VariantId = msg.VariantId,
+            SneakerId = msg.SneakerId,
             Sku = msg.Sku,
             Quantity = 0,
             Reserved = 0,

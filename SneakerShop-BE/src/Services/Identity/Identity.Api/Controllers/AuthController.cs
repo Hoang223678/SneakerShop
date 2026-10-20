@@ -15,7 +15,6 @@ namespace Identity.Api.Controllers;
 public class AuthController(
     AuthDbContext db,
     ITokenService tokens,
-    ILoginAttemptLimiter loginAttempts,
     ITokenRevocationStore revocations) : ControllerBase
 {
     /// <summary>Register a new customer account.</summary>
@@ -41,30 +40,20 @@ public class AuthController(
         return Ok(BuildResponse(user));
     }
 
-    /// <summary>Exchange email + password for a JWT access token. Five failures in 15 minutes lock the email temporarily.</summary>
+    /// <summary>Exchange email + password for a JWT access token.</summary>
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request, CancellationToken ct)
     {
         var email = request.Email.Trim().ToLowerInvariant();
-
-        var lockout = await loginAttempts.GetLockoutAsync(email);
-        if (lockout is not null)
-            throw new AppException(StatusCodes.Status429TooManyRequests,
-                $"Too many failed login attempts. Try again in {Math.Max(1, (int)Math.Ceiling(lockout.Value.TotalMinutes))} minute(s).");
-
         var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email, ct);
 
         // Same message for unknown email and wrong password to avoid account enumeration.
         if (user is null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
-        {
-            await loginAttempts.RecordFailureAsync(email);
             throw new AppException(StatusCodes.Status401Unauthorized, "Invalid email or password.");
-        }
 
         if (!user.IsActive)
             throw new AppException(StatusCodes.Status403Forbidden, "This account is disabled.");
 
-        await loginAttempts.ResetAsync(email);
         return Ok(BuildResponse(user));
     }
 

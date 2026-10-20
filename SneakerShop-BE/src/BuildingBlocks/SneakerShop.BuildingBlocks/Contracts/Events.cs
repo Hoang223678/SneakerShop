@@ -5,6 +5,8 @@ public record OrderLine(Guid VariantId, int Quantity);
 
 // ---- Published by Catalog ----
 public record SneakerVariantCreated(Guid VariantId, Guid SneakerId, string Sku);
+public record SneakerVariantUpdated(Guid VariantId, Guid SneakerId, string Sku);
+public record SneakerVariantDeleted(Guid VariantId);
 
 // ---- Published by Ordering ----
 public record OrderCreated(Guid OrderId, Guid UserId, IReadOnlyList<OrderLine> Items, DateTime PaymentExpiresAt);

@@ -10,6 +10,15 @@ using SneakerShop.Contracts;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddTransient<BearerForwardingHandler>();
+builder.Services.AddHttpClient<ICatalogVariantClient, CatalogVariantClient>(client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["Services:Catalog:BaseUrl"]
+        ?? throw new InvalidOperationException("Services:Catalog:BaseUrl is not configured."));
+    client.Timeout = TimeSpan.FromSeconds(10);
+}).AddHttpMessageHandler<BearerForwardingHandler>();
+
 builder.Services.AddDbContext<InventoryDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("Default"),
         sql => sql.EnableRetryOnFailure()));
@@ -28,6 +37,8 @@ builder.Services.AddMessaging(builder.Configuration, x =>
     x.AddFaultAudit<StockReserved>("inventory");
     x.AddFaultAudit<StockReservationFailed>("inventory");
     x.AddFaultAudit<SneakerVariantCreated>("inventory");
+    x.AddFaultAudit<SneakerVariantUpdated>("inventory");
+    x.AddFaultAudit<SneakerVariantDeleted>("inventory");
     x.AddEntityFrameworkOutbox<InventoryDbContext>(o =>
     {
         o.UseSqlServer();
@@ -39,6 +50,11 @@ builder.Services.AddMessaging(builder.Configuration, x =>
 builder.Services.AddApiDefaults();
 builder.Services.AddSwaggerWithJwt("Sneaker Shop - Inventory API");
 builder.Services.AddControllers().AddApiJson();
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+}
 
 var app = builder.Build();
 
@@ -46,6 +62,7 @@ app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
 {
+    app.UseCors();
     app.UseSwagger();
     app.UseSwaggerUI();
 }

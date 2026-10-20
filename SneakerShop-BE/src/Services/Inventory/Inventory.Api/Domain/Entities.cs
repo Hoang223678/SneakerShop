@@ -13,6 +13,7 @@ public enum ReservationStatus
 public class StockItem
 {
     public Guid VariantId { get; set; }          // same ID as Catalog's SneakerVariant.Id (no FK across services)
+    public Guid SneakerId { get; set; }          // Catalog Sneaker.Id; one sneaker has many size/color variants
     public string? Sku { get; set; }
     public int Quantity { get; set; }            // physical pairs on hand
     public int Reserved { get; set; }            // pairs held for open orders

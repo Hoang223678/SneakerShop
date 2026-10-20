@@ -289,7 +289,7 @@ public class SneakersController(
 
         await publisher.Publish(new SneakerVariantCreated(variant.Id, id, variant.Sku), ct);
 
-        return Created($"/api/sneakers/{id}", new VariantDto(variant.Id, variant.Sku, variant.Size, variant.Color));
+        return Created($"/api/sneakers/{id}", new VariantDto(variant.Id, id, variant.Sku, variant.Size, variant.Color));
     }
 
     /// <summary>
@@ -337,5 +337,5 @@ public class SneakersController(
         new BrandDto(s.Brand.Id, s.Brand.Name, s.Brand.Slug),
         s.Gender, s.Price, s.ImageUrl, s.IsActive, s.CreatedAt,
         s.Variants.OrderBy(v => v.Size).ThenBy(v => v.Color)
-            .Select(v => new VariantDto(v.Id, v.Sku, v.Size, v.Color)).ToList());
+            .Select(v => new VariantDto(v.Id, v.SneakerId, v.Sku, v.Size, v.Color)).ToList());
 }

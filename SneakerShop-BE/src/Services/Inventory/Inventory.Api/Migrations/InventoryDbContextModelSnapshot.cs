@@ -57,10 +57,16 @@ namespace Inventory.Api.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<Guid>("SneakerId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 
                     b.HasKey("VariantId");
+
+                    b.HasIndex("SneakerId")
+                        .HasDatabaseName("IX_StockItems_SneakerId");
 
                     b.ToTable("StockItems", (string)null);
                 });

@@ -9,7 +9,7 @@ namespace Catalog.Api.Caching;
 /// </summary>
 public static class CatalogCacheKeys
 {
-    private const string Version = "v1";
+    private const string Version = "v2";
 
     public const string SneakerListTag = "sneaker-list";
 

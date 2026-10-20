@@ -127,6 +127,8 @@ public sealed class CatalogControllerTests : IDisposable
     public void WriteEndpoints_RequireAdminRole()
     {
         AssertAdminRole(typeof(BrandsController), nameof(BrandsController.Create));
+        AssertAdminRole(typeof(BrandsController), nameof(BrandsController.Update));
+        AssertAdminRole(typeof(BrandsController), nameof(BrandsController.Delete));
         AssertAdminRole(typeof(SneakersController), nameof(SneakersController.Create));
         AssertAdminRole(typeof(SneakersController), nameof(SneakersController.Update));
         AssertAdminRole(typeof(SneakersController), nameof(SneakersController.Delete));
@@ -150,6 +152,41 @@ public sealed class CatalogControllerTests : IDisposable
         var brand = Assert.IsType<BrandDto>(created.Value);
         Assert.Equal("New Balance", brand.Name);
         Assert.Equal("new-balance", brand.Slug);
+    }
+
+    [Fact]
+    public async Task UpdateBrand_RenamesAndRebuildsSlug()
+    {
+        var result = await Brands().Update(_brand.Id, new CreateBrandRequest { Name = "  Nike Sports  " }, default);
+
+        var dto = Assert.IsType<BrandDto>(result.Value);
+        Assert.Equal("Nike Sports", dto.Name);
+        Assert.Equal("nike-sports", dto.Slug);
+        Assert.Equal("Nike Sports", (await Brands().List(default)).Value!.Single().Name);
+    }
+
+    [Fact]
+    public async Task DeleteBrand_IsRejectedWhileSneakersStillUseIt()
+    {
+        await AddSneaker("Air Zoom", 120m);
+
+        var exception = await Assert.ThrowsAsync<AppException>(() => Brands().Delete(_brand.Id, default));
+
+        Assert.Equal(StatusCodes.Status409Conflict, exception.StatusCode);
+        Assert.NotNull(await _db.Brands.FindAsync(_brand.Id));
+    }
+
+    [Fact]
+    public async Task DeleteBrand_RemovesUnusedBrand()
+    {
+        var unused = new Brand { Name = "Converse", Slug = "converse" };
+        _db.Brands.Add(unused);
+        await _db.SaveChangesAsync();
+
+        var result = await Brands().Delete(unused.Id, default);
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.Null(await _db.Brands.FindAsync(unused.Id));
     }
 
     [Fact]
@@ -390,6 +427,113 @@ public sealed class CatalogControllerTests : IDisposable
         var item = Assert.Single(result.Value!);
         Assert.Equal(activeVariant.Id, item.VariantId);
         Assert.Equal(120m, item.UnitPrice);
+    }
+
+    [Fact]
+    public async Task ListVariants_ReturnsActiveSneakerVariantRelationship()
+    {
+        var sneaker = await AddSneaker("Air Zoom", 120m);
+        var size8 = new SneakerVariant { SneakerId = sneaker.Id, Sneaker = sneaker, Sku = "AZ-8", Size = 8m, Color = "Blue" };
+        var size9 = new SneakerVariant { SneakerId = sneaker.Id, Sneaker = sneaker, Sku = "AZ-9", Size = 9m, Color = "Blue" };
+        _db.Variants.AddRange(size8, size9);
+        await _db.SaveChangesAsync();
+
+        var result = await Variants().List(sneaker.Id, default);
+
+        Assert.Equal(2, result.Value!.Count);
+        Assert.All(result.Value, row =>
+        {
+            Assert.Equal(sneaker.Id, row.SneakerId);
+            Assert.Equal("Air Zoom", row.SneakerName);
+        });
+        Assert.Equal(new[] { 8m, 9m }, result.Value.Select(row => row.Size).ToArray());
+    }
+
+    [Fact]
+    public async Task CreateVariant_CreatesSizeColorForSneaker()
+    {
+        var sneaker = await AddSneaker("Air Zoom", 120m);
+        _publisher
+            .Setup(publisher => publisher.Publish(It.IsAny<SneakerVariantCreated>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var result = await Variants().Create(sneaker.Id, new CreateVariantRequest
+        {
+            Sku = " az-900 ",
+            Size = 9.5m,
+            Color = " Blue "
+        }, default);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var variant = Assert.IsType<VariantDto>(created.Value);
+        Assert.Equal("AZ-900", variant.Sku);
+        Assert.Equal(9.5m, variant.Size);
+        Assert.Equal("Blue", variant.Color);
+        _publisher.Verify(publisher => publisher.Publish(
+            It.Is<SneakerVariantCreated>(message =>
+                message.VariantId == variant.Id && message.SneakerId == sneaker.Id && message.Sku == "AZ-900"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateVariant_ChangesSkuSizeAndColor()
+    {
+        var sneaker = await AddSneaker("Air Zoom", 120m);
+        var variant = new SneakerVariant { SneakerId = sneaker.Id, Sneaker = sneaker, Sku = "AZ-9", Size = 9m, Color = "Blue" };
+        _db.Variants.Add(variant);
+        await _db.SaveChangesAsync();
+        _publisher
+            .Setup(publisher => publisher.Publish(It.IsAny<SneakerVariantUpdated>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var result = await Variants().Update(variant.Id, new CreateVariantRequest
+        {
+            Sku = "az-10-black",
+            Size = 10m,
+            Color = " Black "
+        }, default);
+
+        var updated = Assert.IsType<VariantDto>(result.Value);
+        Assert.Equal("AZ-10-BLACK", updated.Sku);
+        Assert.Equal(10m, updated.Size);
+        Assert.Equal("Black", updated.Color);
+        _publisher.Verify(publisher => publisher.Publish(
+            It.Is<SneakerVariantUpdated>(message =>
+                message.VariantId == variant.Id && message.Sku == "AZ-10-BLACK"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteVariant_RemovesVariantAndPublishesEvent()
+    {
+        var sneaker = await AddSneaker("Air Zoom", 120m);
+        var variant = new SneakerVariant { SneakerId = sneaker.Id, Sneaker = sneaker, Sku = "AZ-9", Size = 9m, Color = "Blue" };
+        _db.Variants.Add(variant);
+        await _db.SaveChangesAsync();
+        _publisher
+            .Setup(publisher => publisher.Publish(It.IsAny<SneakerVariantDeleted>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var result = await Variants().Delete(variant.Id, default);
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.Empty(_db.Variants);
+        _publisher.Verify(publisher => publisher.Publish(
+            It.Is<SneakerVariantDeleted>(message => message.VariantId == variant.Id),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private VariantsController Variants(bool isAdmin = true)
+    {
+        var role = isAdmin ? Roles.Admin : Roles.Customer;
+        var identity = new ClaimsIdentity([new Claim(ClaimTypes.Role, role)], "test");
+        return new VariantsController(_db, _publisher.Object, _cache)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+            }
+        };
     }
 
     private SneakersController Sneakers(bool isAdmin = true)

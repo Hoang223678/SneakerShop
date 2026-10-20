@@ -17,6 +17,8 @@ public class InventoryDbContext(DbContextOptions<InventoryDbContext> options) : 
             e.ToTable("StockItems");
             e.HasKey(s => s.VariantId);
             e.Property(s => s.VariantId).ValueGeneratedNever();
+            e.Property(s => s.SneakerId).IsRequired();
+            e.HasIndex(s => s.SneakerId).HasDatabaseName("IX_StockItems_SneakerId");
             e.Property(s => s.Sku).HasMaxLength(64);
             e.Property(s => s.RowVersion).IsRowVersion();
             e.Ignore(s => s.Available);
